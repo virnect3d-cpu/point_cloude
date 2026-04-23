@@ -2,7 +2,8 @@
   "name": "Virnect.Lcc.Editor",
   "rootNamespace": "Virnect.Lcc.Editor",
   "references": [
-    "Virnect.Lcc.Runtime"
+    "Virnect.Lcc.Runtime",
+    "Unity.Mathematics"
   ],
   "includePlatforms": ["Editor"],
   "excludePlatforms": [],
