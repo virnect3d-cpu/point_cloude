@@ -7,15 +7,20 @@ namespace Virnect.Lcc
 {
     // XGrids PortalCam LCC Gaussian Splat decoder.
     //
-    // Layout verified by tools_probe_databin.py on ShinWon_1st_Cutter
-    // (file size 318,902,656 B / 9,965,708 splats = exactly 32.0 B/splat):
+    // 32-byte fixed record, verified by tools_probe_databin.py +
+    // tools_probe_tail16.py + tools_probe_tail_all_lods.py on
+    // ShinWon_1st_Cutter (9,965,708 splats × 32 B = 318,902,656 B exact):
     //
-    //   offset 0..12  : float32 LE × 3  → position (world coords, inside scene bbox)
-    //   offset 12..16 : RGBA8            → color (verified 0..255 range all channels)
-    //   offset 16..32 : TODO             → scale/rotation/opacity/SH (not needed for
-    //                                       point-cloud downgrade; ignored in v2)
+    //   [ 0..12) float32 LE × 3   → position (world coords)
+    //   [12..16) u8     × 4       → RGBA8 color
+    //   [16..22) u16    × 3       → scale (unquantized to manifest.attrs.scale [min..max])
+    //   [22..24) u16              → opacity (unquantized to manifest.attrs.opacity [min..max])
+    //   [24..26) u16              → unknown, tight distribution ~0.88 (SH DC? reserved?)
+    //   [26..32) 6 B              → always zeros (reserved; confirmed across all 5 LODs)
     //
-    // LOD slicing: cumulative splats[] × 32B gives the byte range for each LOD.
+    // Attribute ranges come from manifest.attributes (e.g. scale max = [6.82, 5.71, 3.49]).
+    //
+    // LOD slicing: cumulative splats[] × 32B.
     public static class LccSplatDecoder
     {
         public const int RecordSize = 32;
@@ -23,10 +28,11 @@ namespace Virnect.Lcc
         public struct Point
         {
             public float3  position;
-            public Color32 color;       // RGBA8
+            public Color32 color;
+            public float3  scale;
+            public float   opacity;
         }
 
-        // Read one LOD level as points. Does NOT hold onto the file handle.
         public static Point[] DecodeLod(LccScene scene, int lodLevel)
         {
             if (scene == null) throw new ArgumentNullException(nameof(scene));
@@ -35,6 +41,30 @@ namespace Virnect.Lcc
             if (splats == null || lodLevel < 0 || lodLevel >= splats.Length)
                 throw new ArgumentOutOfRangeException(nameof(lodLevel),
                     $"Must be in 0..{(splats?.Length ?? 0) - 1}");
+
+            // Attribute ranges for unquantization
+            float sMin0 = 0, sMin1 = 0, sMin2 = 0, sMax0 = 1, sMax1 = 1, sMax2 = 1;
+            float oMin = 0, oMax = 1;
+            if (manifest.attributes != null)
+            {
+                foreach (var a in manifest.attributes)
+                {
+                    if (a == null) continue;
+                    if (a.name == "scale" && a.min?.Length >= 3 && a.max?.Length >= 3)
+                    {
+                        sMin0 = a.min[0]; sMin1 = a.min[1]; sMin2 = a.min[2];
+                        sMax0 = a.max[0]; sMax1 = a.max[1]; sMax2 = a.max[2];
+                    }
+                    else if (a.name == "opacity" && a.min?.Length >= 1 && a.max?.Length >= 1)
+                    {
+                        oMin = a.min[0]; oMax = a.max[0];
+                    }
+                }
+            }
+            float sRng0 = sMax0 - sMin0;
+            float sRng1 = sMax1 - sMin1;
+            float sRng2 = sMax2 - sMin2;
+            float oRng = oMax - oMin;
 
             int count = splats[lodLevel];
             long byteStart = 0;
@@ -49,13 +79,12 @@ namespace Virnect.Lcc
             using (var fs = File.OpenRead(dataPath))
             {
                 fs.Seek(byteStart, SeekOrigin.Begin);
-                var buf = new byte[Math.Min(byteLen, 16 * 1024 * 1024)];  // 16MB chunks
+                var buf = new byte[Math.Min(byteLen, 16 * 1024 * 1024)];
                 int outIdx = 0;
                 long remaining = byteLen;
                 while (remaining > 0)
                 {
                     int toRead = (int)Math.Min(remaining, buf.Length);
-                    // Align to record boundary
                     toRead -= toRead % RecordSize;
                     if (toRead == 0) break;
                     int read = fs.Read(buf, 0, toRead);
@@ -71,10 +100,19 @@ namespace Virnect.Lcc
                         byte g = buf[off + 13];
                         byte b = buf[off + 14];
                         byte a = buf[off + 15];
+                        ushort qsx = BitConverter.ToUInt16(buf, off + 16);
+                        ushort qsy = BitConverter.ToUInt16(buf, off + 18);
+                        ushort qsz = BitConverter.ToUInt16(buf, off + 20);
+                        ushort qop = BitConverter.ToUInt16(buf, off + 22);
                         points[outIdx++] = new Point
                         {
                             position = new float3(x, y, z),
                             color    = new Color32(r, g, b, a),
+                            scale    = new float3(
+                                sMin0 + (qsx / 65535f) * sRng0,
+                                sMin1 + (qsy / 65535f) * sRng1,
+                                sMin2 + (qsz / 65535f) * sRng2),
+                            opacity  = oMin + (qop / 65535f) * oRng,
                         };
                     }
                     remaining -= read;
@@ -85,7 +123,6 @@ namespace Virnect.Lcc
             return points;
         }
 
-        // Byte range of a LOD inside data.bin (useful for memory-mapped/streaming access).
         public static (long byteStart, long byteLen, int count) GetLodRange(LccManifest m, int lod)
         {
             if (m?.splats == null || lod < 0 || lod >= m.splats.Length)

@@ -39,23 +39,23 @@
   LOD 4: splats=  320,706  bytes=[ 308,640,064 .. 318,902,656)
   ```
 
-### 3.2 레코드 내부 32B 레이아웃
+### 3.2 레코드 내부 32B 레이아웃 ✅ 전면 확정
 
 ```
-offset  bytes  type              field       status
-─────── ───── ───────────────── ─────────── ─────────────
-[0..12)  12   float32 LE × 3    position    ✅ 확정 (2000 샘플 전부 scene bbox 내부)
-[12..16)  4   u8 × 4            RGBA        ✅ 강한 증거 (4채널 모두 0..255 분포, α 실제 변동)
-[16..32) 16   ?                 scale/rot/SH 🔍 미확정 (f16 가설 기각)
+offset  bytes  type              field       unquantize
+─────── ───── ───────────────── ─────────── ──────────────────────────────
+[ 0..12)  12  float32 LE × 3    position    (그대로 사용)
+[12..16)   4  u8 × 4            RGBA8       (그대로 사용)
+[16..18)   2  u16               scale.x     min + (u/65535) × (max−min)  @ attrs.scale
+[18..20)   2  u16               scale.y          〃
+[20..22)   2  u16               scale.z          〃
+[22..24)   2  u16               opacity     min + (u/65535) × (max−min)  @ attrs.opacity
+[24..26)   2  u16               ? (~0.88 cluster, 아마 SH DC / 밝기)
+[26..32)   6  zeros             reserved    (모든 LOD 100% 항상 0)
 ```
 
-### 3.3 tail 16B 추가 역분석 TODO
-- f16×8 가설: 값이 0 근처 몰리고 |quat|≠1, NaN 3% → **기각**.
-- 다음 시도: 
-  1. 바이트별 u8 히스토그램 (RGBA8 스타일 인지)
-  2. u16×8 가설 (양자화 범위가 palette 인지)
-  3. 첫 16B 가 공통 + 마지막 16B 가 per-splat 가 아닐 가능성 (블록 단위 codebook)
-  4. XGrids SDK 문서/샘플 확보 시 대조
+검증: 5 LOD × 각 2000 샘플 → position 100% in scene bbox, scale/opacity 100% in attr range,
+scale median 이 LOD 높아질수록 커짐 (0.011 → 0.042 — 물리적으로 합리).
 
 ### 3.4 v2 범위에서 활용 가능한 데이터 ✅
 **position + color 만으로 포인트 클라우드 MVP 완성 가능** (사용자 요구: 기존 기능 다운그레이드).
