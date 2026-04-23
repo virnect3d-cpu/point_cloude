@@ -25,6 +25,11 @@ namespace Virnect.Lcc.Editor
         float _colorizerCellSize = 1.0f;  // voxel grid cell (m)
         int  _colorizerK = 6;             // k-NN 이웃 수
         bool _hideSplatAfterColorize = false;
+        // Photoreal / quality
+        bool _photoRealMode = false;      // LOD0 + k=3 + tight + opacity + 1x subdiv
+        int  _meshSubdivide = 0;          // 메쉬 서브디비전 passes (0~2 권장)
+        bool _useSplatOpacity = false;    // splat path 일 때 opacity 가중치
+        float _distanceFalloff = 1f;      // inverse-distance 지수 (1=inverse, 2=inverse-square)
         bool _spawnCharacter = true;
         bool _frameCamera = true;
         bool _cleanLaunch = true;
@@ -194,25 +199,35 @@ namespace Virnect.Lcc.Editor
                     _colorizeMesh = EditorGUILayout.ToggleLeft("🎨 Colorize Mesh  (k-NN color transfer)", _colorizeMesh);
                     using (new EditorGUI.DisabledScope(!_colorizeMesh))
                     {
-                        _colorSource = (ColorSourceMode)EditorGUILayout.EnumPopup("  color source", _colorSource);
-                        if (_colorSource == ColorSourceMode.SplatDataBin)
+                        bool prev = _photoRealMode;
+                        _photoRealMode = EditorGUILayout.ToggleLeft("  ✨ PhotoReal preset  (LOD0 · k=3 · subdiv=1 · opacity · tight)", _photoRealMode);
+                        if (_photoRealMode && !prev) _ApplyPhotoRealPreset();
+
+                        using (new EditorGUI.DisabledScope(_photoRealMode))
                         {
-                            _colorSourceLod = EditorGUILayout.IntSlider("  source LOD", _colorSourceLod, 0, 4);
-                        }
-                        else
-                        {
-                            using (new GUILayout.HorizontalScope())
+                            _colorSource = (ColorSourceMode)EditorGUILayout.EnumPopup("  color source", _colorSource);
+                            if (_colorSource == ColorSourceMode.SplatDataBin)
                             {
-                                _externalPlyPath = EditorGUILayout.TextField("  external PLY", _externalPlyPath);
-                                if (GUILayout.Button("…", GUILayout.Width(28)))
+                                _colorSourceLod = EditorGUILayout.IntSlider("  source LOD", _colorSourceLod, 0, 4);
+                            }
+                            else
+                            {
+                                using (new GUILayout.HorizontalScope())
                                 {
-                                    string picked = EditorUtility.OpenFilePanel("Colored point cloud PLY", "", "ply");
-                                    if (!string.IsNullOrEmpty(picked)) _externalPlyPath = picked.Replace('\\', '/');
+                                    _externalPlyPath = EditorGUILayout.TextField("  external PLY", _externalPlyPath);
+                                    if (GUILayout.Button("…", GUILayout.Width(28)))
+                                    {
+                                        string picked = EditorUtility.OpenFilePanel("Colored point cloud PLY", "", "ply");
+                                        if (!string.IsNullOrEmpty(picked)) _externalPlyPath = picked.Replace('\\', '/');
+                                    }
                                 }
                             }
+                            _colorizerCellSize = EditorGUILayout.Slider("  voxel cell (m)", _colorizerCellSize, 0.1f, 3f);
+                            _colorizerK        = EditorGUILayout.IntSlider("  k neighbors", _colorizerK, 1, 16);
+                            _meshSubdivide     = EditorGUILayout.IntSlider("  mesh subdivide", _meshSubdivide, 0, 2);
+                            _useSplatOpacity   = EditorGUILayout.ToggleLeft("  weight by splat opacity", _useSplatOpacity);
+                            _distanceFalloff   = EditorGUILayout.Slider("  distance falloff", _distanceFalloff, 1f, 4f);
                         }
-                        _colorizerCellSize    = EditorGUILayout.Slider("  voxel cell (m)", _colorizerCellSize, 0.2f, 3f);
-                        _colorizerK           = EditorGUILayout.IntSlider("  k neighbors", _colorizerK, 1, 16);
                         _hideSplatAfterColorize = EditorGUILayout.ToggleLeft("  hide splats after colorize", _hideSplatAfterColorize);
                     }
                     EditorGUI.indentLevel--;
@@ -354,7 +369,11 @@ namespace Virnect.Lcc.Editor
             int colorizerK = 6,
             bool hideSplatAfterColorize = false,
             ColorSourceMode colorSource = ColorSourceMode.SplatDataBin,
-            string externalPlyPath = "")
+            string externalPlyPath = "",
+            bool photoRealMode = false,
+            int meshSubdivide = 0,
+            bool useSplatOpacity = false,
+            float distanceFalloff = 1f)
         {
             var w = CreateInstance<LccPlaygroundWindow>();
             try
@@ -373,6 +392,11 @@ namespace Virnect.Lcc.Editor
                 w._colorizerCellSize = colorizerCellSize;
                 w._colorizerK     = colorizerK;
                 w._hideSplatAfterColorize = hideSplatAfterColorize;
+                w._photoRealMode  = photoRealMode;
+                w._meshSubdivide  = meshSubdivide;
+                w._useSplatOpacity = useSplatOpacity;
+                w._distanceFalloff = distanceFalloff;
+                if (photoRealMode) w._ApplyPhotoRealPreset();
                 return w._LaunchCore();
             }
             finally
@@ -465,22 +489,41 @@ namespace Virnect.Lcc.Editor
             return splatGO;
         }
 
+        void _ApplyPhotoRealPreset()
+        {
+            // 기본 PhotoReal: LOD0 source + tight k-NN + opacity 가중치 + 강한 falloff
+            // subdivide 는 mesh topology 비중이라 기본 0. 더 올리고 싶으면 UI 에서 수동으로.
+            _colorSource      = ColorSourceMode.SplatDataBin;
+            _colorSourceLod   = 0;      // 원본 밀도 (5.14M for ShinWon)
+            _colorizerCellSize = 0.3f;  // 세밀한 voxel grid
+            _colorizerK       = 3;      // top-3 inverse-distance blend
+            _meshSubdivide    = 0;      // subdivide 1 = ~45s overhead, 기본 off
+            _useSplatOpacity  = true;   // 창/유리 translucent splat 억제
+            _distanceFalloff  = 2f;     // inverse-square → 가까운 splat 우세
+            _hideSplatAfterColorize = true;
+        }
+
         void _SpawnColoredMesh(Mesh colliderMesh, GameObject splatGO)
         {
             try
             {
-                // colliderMesh 는 MeshCollider.sharedMesh 로 이미 참조됨 → 별도 Mesh 인스턴스 복제
-                // (colors32 쓰는 순간 collider 쪽 인스턴싱 발동하는 걸 피하려고 분리)
-                var vizMesh = new Mesh { name = colliderMesh.name + "_colored", indexFormat = colliderMesh.indexFormat };
-                vizMesh.vertices  = colliderMesh.vertices;
-                vizMesh.triangles = colliderMesh.triangles;
-                vizMesh.RecalculateBounds();
-                vizMesh.RecalculateNormals();
+                double tSub0 = EditorApplication.timeSinceStartup;
+                // collider mesh 그대로 두고, 색상용 viz mesh 는 복제 후 (선택) 서브디비전
+                Mesh vizMesh = LccMeshSubdivider.Subdivide(colliderMesh, _meshSubdivide);
+                vizMesh.name = colliderMesh.name + (_meshSubdivide > 0 ? $"_subdiv{_meshSubdivide}" : "_colored");
+                double tSub1 = EditorApplication.timeSinceStartup;
 
-                var opts = LccMeshColorizer.Options.Default;
-                opts.cellSize = _colorizerCellSize;
-                opts.k = _colorizerK;
-                opts.maxRadius = _colorizerCellSize * 3f;
+                var opts = _photoRealMode
+                    ? LccMeshColorizer.Options.PhotoReal
+                    : LccMeshColorizer.Options.Default;
+                if (!_photoRealMode)
+                {
+                    opts.cellSize        = _colorizerCellSize;
+                    opts.k               = _colorizerK;
+                    opts.maxRadius       = _colorizerCellSize * 3f;
+                    opts.useSourceOpacity = _useSplatOpacity;
+                    opts.distanceFalloff = _distanceFalloff;
+                }
 
                 string summary;
                 double t0 = EditorApplication.timeSinceStartup;
@@ -504,6 +547,8 @@ namespace Virnect.Lcc.Editor
                     double t2 = EditorApplication.timeSinceStartup;
                     summary = $"source=data.bin LOD {_colorSourceLod} · {splats.Length:N0} splats · decode {(t1 - t0) * 1000:F0} ms · colorize {(t2 - t1) * 1000:F0} ms";
                 }
+                if (_meshSubdivide > 0)
+                    summary += $" · subdiv {_meshSubdivide} ({(tSub1 - tSub0) * 1000:F0} ms)";
 
                 var vizGO = new GameObject("__LccColoredMesh");
                 vizGO.transform.SetParent(splatGO.transform, false);

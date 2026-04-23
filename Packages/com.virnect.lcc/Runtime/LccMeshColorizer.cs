@@ -22,19 +22,34 @@ namespace Virnect.Lcc
     {
         public struct Options
         {
-            public float cellSize;      // 권장 0.5 ~ 2.0 m (factory 수준)
-            public int   k;             // 이웃 수 (4~8 권장)
-            public float maxRadius;     // 이 반경 초과 splat 은 무시 (0 = 무제한)
-            public Color fallbackColor; // splat 없는 vertex 기본색
+            public float cellSize;          // 권장 0.3 ~ 2.0 m
+            public int   k;                 // 이웃 수. photoreal: 1~3, 부드럽게: 6~8
+            public float maxRadius;         // 반경 초과 splat 은 무시 (0 = 무제한)
+            public Color fallbackColor;     // splat 없는 vertex 기본색
             public bool  parallel;
+            public bool  useSourceOpacity;  // splat path 에서 opacity 를 가중치로 반영
+            public float distanceFalloff;   // 1/d^falloff — 1=inverse, 2=inverse-square (더 날카로움)
 
             public static Options Default => new Options
             {
-                cellSize      = 1.0f,
-                k             = 6,
-                maxRadius     = 3.0f,
-                fallbackColor = new Color(0.5f, 0.5f, 0.5f, 1f),
-                parallel      = true,
+                cellSize         = 1.0f,
+                k                = 6,
+                maxRadius        = 3.0f,
+                fallbackColor    = new Color(0.5f, 0.5f, 0.5f, 1f),
+                parallel         = true,
+                useSourceOpacity = false,
+                distanceFalloff  = 1f,
+            };
+
+            public static Options PhotoReal => new Options
+            {
+                cellSize         = 0.3f,
+                k                = 3,
+                maxRadius        = 0.5f,
+                fallbackColor    = new Color(0.35f, 0.35f, 0.35f, 1f),
+                parallel         = true,
+                useSourceOpacity = true,
+                distanceFalloff  = 2f,
             };
         }
 
@@ -47,25 +62,30 @@ namespace Virnect.Lcc
             if (splats == null || splats.Length == 0) return null;
             var positions = new Vector3[splats.Length];
             var srcColors = new Color32[splats.Length];
+            var srcWeights = opts.useSourceOpacity ? new float[splats.Length] : null;
             for (int i = 0; i < splats.Length; i++)
             {
                 var p = splats[i].position;
                 positions[i] = new Vector3(p.x, p.y, p.z);
                 srcColors[i] = splats[i].color;
+                if (srcWeights != null) srcWeights[i] = Mathf.Clamp01(splats[i].opacity);
             }
-            return Colorize(mesh, positions, srcColors, opts);
+            return Colorize(mesh, positions, srcColors, opts, srcWeights);
         }
 
         /// <summary>
         /// Generic point-cloud → mesh 컬러 전송 (positions + colors).
         /// External colored PLY (XGrids_Splats_LODn.ply 등) 를 source 로 쓸 때 이 오버로드 사용.
+        /// srcWeights 는 optional — splat opacity 같은 per-point 가중치를 k-NN blend 에 곱함.
         /// </summary>
-        public static Color32[] Colorize(Mesh mesh, Vector3[] srcPositions, Color32[] srcColors, Options opts)
+        public static Color32[] Colorize(Mesh mesh, Vector3[] srcPositions, Color32[] srcColors, Options opts, float[] srcWeights = null)
         {
             if (mesh == null || srcPositions == null || srcPositions.Length == 0)
                 return null;
             if (srcColors == null || srcColors.Length != srcPositions.Length)
                 throw new System.ArgumentException("srcPositions 와 srcColors 길이 불일치");
+            if (srcWeights != null && srcWeights.Length != srcPositions.Length)
+                throw new System.ArgumentException("srcWeights 길이 불일치");
 
             var verts = mesh.vertices;
             int n = verts.Length;
@@ -139,13 +159,17 @@ namespace Virnect.Lcc
 
                     if (bestI[0] < 0) { colors[vi] = fallback; continue; }
                     float wsum = 0f, r = 0f, g = 0f, b = 0f;
+                    float falloff = math.max(0.5f, opts.distanceFalloff);
                     for (int i = 0; i < k; i++)
                     {
                         if (bestI[i] < 0) break;
-                        float w = 1f / math.max(1e-4f, math.sqrt(bestD2[i]));
+                        float d = math.max(1e-4f, math.sqrt(bestD2[i]));
+                        float w = 1f / math.pow(d, falloff);
+                        if (srcWeights != null) w *= math.max(0f, srcWeights[bestI[i]]);
                         var c = srcColors[bestI[i]];
                         r += c.r * w; g += c.g * w; b += c.b * w; wsum += w;
                     }
+                    if (wsum <= 0f) { colors[vi] = fallback; continue; }
                     float inv = 1f / wsum;
                     colors[vi] = new Color32(
                         (byte)math.clamp(r * inv, 0f, 255f),
