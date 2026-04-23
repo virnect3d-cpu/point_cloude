@@ -65,6 +65,21 @@ def folder_meta(p):
     )
 
 
+def shader_meta(p):
+    return (
+        "fileFormatVersion: 2\n"
+        f"guid: {guid_for(p)}\n"
+        "ShaderImporter:\n"
+        "  externalObjects: {}\n"
+        "  defaultTextures: []\n"
+        "  nonModifiableTextures: []\n"
+        "  preprocessorOverride: 0\n"
+        "  userData: \n"
+        "  assetBundleName: \n"
+        "  assetBundleVariant: \n"
+    )
+
+
 def text_meta(p):
     return (
         "fileFormatVersion: 2\n"
@@ -94,6 +109,8 @@ def main():
                 body = cs_meta(p)
             elif ext == "asmdef":
                 body = asmdef_meta(p)
+            elif ext == "shader":
+                body = shader_meta(p)
             elif ext in ("json", "md", "txt", "asmref"):
                 body = text_meta(p)
             else:
