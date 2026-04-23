@@ -68,7 +68,8 @@ namespace Virnect.Lcc
                 var verts  = new Vector3[vCount];
                 var cols   = new Color32[vCount];
                 var uv0    = new Vector2[vCount];  // corner
-                var uv1    = new Vector2[vCount];  // (scale_avg, opacity)
+                var uv1    = new Vector2[vCount];  // (scale_x, scale_y)
+                var uv2    = new Vector2[vCount];  // (scale_z, opacity)
                 var tris   = new int[iCount];
 
                 // 쿼드 코너 오프셋 (-1..1)
@@ -82,7 +83,6 @@ namespace Virnect.Lcc
                     var p  = pts[i].position;
                     var c  = pts[i].color;
                     var s  = pts[i].scale;
-                    float sAvg = (s.x + s.y + s.z) / 3f;
                     float op = pts[i].opacity;
 
                     int v = i * 4;
@@ -91,7 +91,8 @@ namespace Virnect.Lcc
                         verts[v + k] = new Vector3(p.x, p.y, p.z);
                         cols[v + k]  = c;
                         uv0[v + k]   = co[k];
-                        uv1[v + k]   = new Vector2(sAvg, op);
+                        uv1[v + k]   = new Vector2(s.x, s.y);
+                        uv2[v + k]   = new Vector2(s.z, op);
                     }
                     int t = i * 6;
                     tris[t + 0] = v + 0;
@@ -114,6 +115,7 @@ namespace Virnect.Lcc
                 _mesh.SetColors(cols);
                 _mesh.SetUVs(0, uv0);
                 _mesh.SetUVs(1, uv1);
+                _mesh.SetUVs(2, uv2);
                 _mesh.SetTriangles(tris, 0);
                 _mesh.bounds = GetWorldBounds();
 

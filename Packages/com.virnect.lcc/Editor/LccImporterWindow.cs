@@ -1,6 +1,8 @@
 using System.Collections.Generic;
+using System.Text;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Networking;
 
 namespace Virnect.Lcc.Editor
 {
@@ -39,6 +41,14 @@ namespace Virnect.Lcc.Editor
         int _selectedIndex = -1;
         Vector2 _scroll;
 
+        // ── v2 API integration ─────────────────────────────────────────────
+        string _apiBase = "http://127.0.0.1:8001";
+        string _cmpReferencePly = "";
+        int    _cmpLod = 2;
+        int    _cmpSample = 200000;
+        string _cmpResult = "(아직 비교 안 함)";
+        bool   _cmpBusy = false;
+
         void OnEnable()
         {
             if (_slots.Count == 0) _slots.Add(new SceneSlot());
@@ -55,6 +65,8 @@ namespace Virnect.Lcc.Editor
             _RenderSettingsSection();
             EditorGUILayout.Space(6);
             _ActionsSection();
+            EditorGUILayout.Space(6);
+            _ApiCompareSection();
             EditorGUILayout.Space(6);
             _InspectSelected();
 
@@ -269,6 +281,91 @@ namespace Virnect.Lcc.Editor
             cam.nearClipPlane = 0.1f;
             cam.farClipPlane  = Mathf.Max(cam.farClipPlane, s * 5f);
             SceneView.lastActiveSceneView?.Frame(combined.Value, false);
+        }
+
+        // ── v2 API (Hausdorff/chamfer compare) ─────────────────────────────
+        void _ApiCompareSection()
+        {
+            EditorGUILayout.LabelField("v2 API — 3D 스캔 비교 (Hausdorff / chamfer)", EditorStyles.boldLabel);
+
+            using (new EditorGUILayout.VerticalScope(GUI.skin.box))
+            {
+                _apiBase = EditorGUILayout.TextField("API base",          _apiBase);
+                _cmpReferencePly = EditorGUILayout.TextField("reference PLY", _cmpReferencePly);
+                _cmpLod    = EditorGUILayout.IntSlider("비교 LOD", _cmpLod, 0, 4);
+                _cmpSample = EditorGUILayout.IntField("sample N", _cmpSample);
+
+                var selected = _SelectedScene();
+                GUI.enabled = !_cmpBusy && selected != null
+                              && selected.rootPath != null
+                              && !string.IsNullOrEmpty(_cmpReferencePly);
+                if (GUILayout.Button(_cmpBusy ? "⏳ 비교 중..." : "▶ 비교 실행", GUILayout.Height(28)))
+                    _RunCompare(selected);
+                GUI.enabled = true;
+
+                using (new EditorGUI.DisabledScope(true))
+                    EditorGUILayout.TextArea(_cmpResult, GUILayout.MinHeight(70));
+            }
+
+            if (GUI.changed) Repaint();
+        }
+
+        LccScene _SelectedScene()
+        {
+            if (_selectedIndex < 0 || _selectedIndex >= _slots.Count) return null;
+            return _slots[_selectedIndex].scene;
+        }
+
+        void _RunCompare(LccScene sc)
+        {
+            _cmpBusy = true;
+            _cmpResult = "요청 전송 중...\n" + _apiBase + "/api/lcc/compare";
+
+            var payload = $"{{\"lcc_directory\":\"{sc.rootPath.Replace("\\","/")}\","
+                        + $"\"reference_ply\":\"{_cmpReferencePly.Replace("\\","/")}\","
+                        + $"\"lod\":{_cmpLod},\"sample\":{_cmpSample}}}";
+
+            var req = new UnityWebRequest(_apiBase + "/api/lcc/compare", "POST");
+            req.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(payload));
+            req.downloadHandler = new DownloadHandlerBuffer();
+            req.SetRequestHeader("Content-Type", "application/json");
+            var op = req.SendWebRequest();
+
+            op.completed += _ =>
+            {
+                try
+                {
+                    if (req.result != UnityWebRequest.Result.Success)
+                    {
+                        _cmpResult = "❌ " + req.error + "\n" + req.downloadHandler.text;
+                        return;
+                    }
+                    var text = req.downloadHandler.text;
+                    // 간단 파싱 (JsonUtility 용 DTO)
+                    var r = JsonUtility.FromJson<CompareResp>(text);
+                    _cmpResult =
+                        $"n_lcc = {r.n_lcc:N0}   n_ref = {r.n_ref:N0}\n" +
+                        $"chamfer symmetric = {r.chamfer_symmetric:F4} m\n" +
+                        $"Hausdorff         = {r.hausdorff:F4} m\n" +
+                        $"RMS               = {r.rms:F4} m\n" +
+                        $"p50 / p90 / p99   = {r.p50:F3} / {r.p90:F3} / {r.p99:F3} m\n" +
+                        $"elapsed           = {r.elapsed_sec:F2} s";
+                }
+                catch (System.Exception e) { _cmpResult = "parse error: " + e.Message; }
+                finally { _cmpBusy = false; req.Dispose(); Repaint(); }
+            };
+        }
+
+        [System.Serializable]
+        class CompareResp
+        {
+            public int n_lcc;
+            public int n_ref;
+            public float chamfer_symmetric;
+            public float hausdorff;
+            public float rms;
+            public float p50, p90, p99;
+            public float elapsed_sec;
         }
 
         // ── Inspector-like view for the selected scene ─────────────────────
