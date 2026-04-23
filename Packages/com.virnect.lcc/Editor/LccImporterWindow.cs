@@ -6,177 +6,429 @@ using UnityEngine.Networking;
 
 namespace Virnect.Lcc.Editor
 {
-    /// LCC 전용 Editor Window — UPM 패키지 사용자가 실제로 쓰게 될 메인 허브.
+    /// LCC 전용 Editor Window — UPM 패키지 사용자의 메인 허브.
     /// 기능:
-    ///   - 씬 리스트 관리 (추가/제거/옵션)
-    ///   - 렌더 모드 선택 (Point vs Splat Billboard)
-    ///   - LOD / 크기 / 불투명도 조절
-    ///   - 합치기 플랜 미리보기 (동일 EPSG 좌표계 가정)
-    ///   - 월드로 인스턴스화 (LccSceneMerger.Plan 결과를 Hierarchy 에 실제 GameObject 로)
-    ///   - 기존 LCC GameObject 전체 제거
-    ///   - 선택된 씬 상세 정보
+    ///   · 씬 리스트 관리 / 렌더 설정 / 합치기 플랜·인스턴스화
+    ///   · 파이썬 백엔드 서버 (installed ↔ started) 토글  ← 실행.bat 의 역할 내재화
+    ///   · v2 API 호출 (Hausdorff 비교)
+    ///   · 선택된 씬의 매니페스트 요약
     public sealed class LccImporterWindow : EditorWindow
     {
         [MenuItem("Virnect/LCC Importer")]
-        public static void Open() => GetWindow<LccImporterWindow>("LCC Importer").minSize = new Vector2(380, 500);
+        public static void Open()
+        {
+            var w = GetWindow<LccImporterWindow>("LCC Importer");
+            w.minSize = new Vector2(420, 620);
+            w.Show();
+        }
 
-        enum RenderMode { PointCloud, SplatBillboard }
+        // ── State ──────────────────────────────────────────────────────────
+        enum RenderMode { SplatBillboard, PointCloud }
 
         [System.Serializable]
-        class SceneSlot
-        {
-            public LccScene scene;
-            public bool enabled = true;
-        }
+        class SceneSlot { public LccScene scene; public bool enabled = true; }
 
         List<SceneSlot> _slots = new List<SceneSlot>();
         RenderMode _renderMode = RenderMode.SplatBillboard;
         int   _lodLevel = 4;
-        float _pointSize = 0.03f;
         float _scaleMultiplier = 1.5f;
         float _opacityBoost = 0.3f;
         Color _tint = Color.white;
         bool  _frameCameraAfterInstantiate = true;
-
+        bool  _attachLodStreamer = true;
         int _selectedIndex = -1;
-        Vector2 _scroll;
 
-        // ── v2 API integration ─────────────────────────────────────────────
-        string _apiBase = "http://127.0.0.1:8001";
+        // Foldouts
+        bool _foldQuickStart = true;
+        bool _foldScenes     = true;
+        bool _foldRender     = true;
+        bool _foldActions    = true;
+        bool _foldServer     = true;
+        bool _foldCompare    = false;
+        bool _foldSelected   = false;
+
+        // Server state
+        bool   _serverHealthy = false;
+        string _serverInfo = "";
+        double _lastHealthTime = 0;
+        string _serverLog = "";
+
+        // Compare
         string _cmpReferencePly = "";
         int    _cmpLod = 2;
         int    _cmpSample = 200000;
-        string _cmpResult = "(아직 비교 안 함)";
+        string _cmpResult = "";
         bool   _cmpBusy = false;
 
+        Vector2 _scroll;
+
+        // ── Lifecycle ─────────────────────────────────────────────────────
         void OnEnable()
         {
             if (_slots.Count == 0) _slots.Add(new SceneSlot());
+            _HealthCheck();
         }
 
+        void OnFocus() => _HealthCheck();
+
+        void Update()
+        {
+            // 5초마다 자동 헬스체크
+            if (EditorApplication.timeSinceStartup - _lastHealthTime > 5) _HealthCheck();
+        }
+
+        // ── GUI ───────────────────────────────────────────────────────────
         void OnGUI()
         {
+            _TopBar();
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
 
-            _HeaderSection();
-            EditorGUILayout.Space(6);
+            _QuickStartSection();
             _ScenesSection();
-            EditorGUILayout.Space(6);
             _RenderSettingsSection();
-            EditorGUILayout.Space(6);
             _ActionsSection();
-            EditorGUILayout.Space(6);
+            _ServerSection();
             _ApiCompareSection();
-            EditorGUILayout.Space(6);
-            _InspectSelected();
+            _InspectSelectedSection();
 
             EditorGUILayout.EndScrollView();
         }
 
-        // ── Header ─────────────────────────────────────────────────────────
-        void _HeaderSection()
+        // ── Top status bar ────────────────────────────────────────────────
+        void _TopBar()
         {
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
-                GUILayout.Label("Virnect LCC Importer", EditorStyles.toolbarButton,
-                                GUILayout.Width(170));
+                GUILayout.Label("◆ Virnect LCC Importer",
+                                EditorStyles.toolbarButton, GUILayout.Width(175));
+
+                // Server status pill
+                string pill = _serverHealthy ? "● API online" : "○ API offline";
+                var style = new GUIStyle(EditorStyles.toolbarButton)
+                {
+                    normal = { textColor = _serverHealthy ? new Color(0.45f, 0.85f, 0.55f) : new Color(0.85f, 0.55f, 0.55f) },
+                    alignment = TextAnchor.MiddleLeft, fontStyle = FontStyle.Bold
+                };
+                if (GUILayout.Button(pill, style, GUILayout.Width(110))) _HealthCheck();
+
+                // scene count
+                int active = 0; foreach (var s in _slots) if (s.enabled && s.scene != null) active++;
+                GUILayout.Label($"· {active} active scene" + (active == 1 ? "" : "s"),
+                                EditorStyles.toolbarButton, GUILayout.Width(110));
+
                 GUILayout.FlexibleSpace();
-                if (GUILayout.Button("Docs", EditorStyles.toolbarButton, GUILayout.Width(50)))
+
+                if (GUILayout.Button("Docs", EditorStyles.toolbarButton, GUILayout.Width(46)))
                     Application.OpenURL("https://github.com/virnect3d-cpu/point_cloude/blob/v2-main/docs/pipeline.md");
-                if (GUILayout.Button("Repo", EditorStyles.toolbarButton, GUILayout.Width(50)))
+                if (GUILayout.Button("Repo", EditorStyles.toolbarButton, GUILayout.Width(46)))
                     Application.OpenURL("https://github.com/virnect3d-cpu/point_cloude/tree/v2-main");
             }
-            EditorGUILayout.HelpBox(
-                "XGrids PortalCam .lcc 를 드래그해 여러 씬을 합치고, 포인트/스플랫 형태로 렌더합니다. 모든 씬이 동일 EPSG 좌표계라 가정.",
-                MessageType.Info);
         }
 
-        // ── Scenes list ───────────────────────────────────────────────────
-        void _ScenesSection()
+        // ── Quick start card ──────────────────────────────────────────────
+        void _QuickStartSection()
         {
-            EditorGUILayout.LabelField("LCC Scenes", EditorStyles.boldLabel);
-            int removeIdx = -1;
-            for (int i = 0; i < _slots.Count; i++)
+            _foldQuickStart = EditorGUILayout.BeginFoldoutHeaderGroup(_foldQuickStart, "🚀 Quick Start");
+            if (_foldQuickStart)
             {
-                using (new EditorGUILayout.HorizontalScope(GUI.skin.box))
+                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
                 {
-                    _slots[i].enabled = EditorGUILayout.Toggle(_slots[i].enabled, GUILayout.Width(16));
-                    var picked = (LccScene)EditorGUILayout.ObjectField(
-                        _slots[i].scene, typeof(LccScene), false);
-                    if (picked != _slots[i].scene) { _slots[i].scene = picked; _selectedIndex = i; }
-                    GUI.enabled = _slots[i].scene != null;
-                    if (GUILayout.Button("▸", GUILayout.Width(22))) _selectedIndex = i;
-                    GUI.enabled = true;
-                    if (GUILayout.Button("✕", GUILayout.Width(22))) removeIdx = i;
+                    EditorGUILayout.LabelField(
+                        "1. `.lcc` 파일이 든 폴더를 Project 에 복사\n" +
+                        "2. 아래 씬 리스트에 `LccScene` 에셋 드래그\n" +
+                        "3. Render Settings 에서 모드/LOD 선택\n" +
+                        "4. ▶ 월드로 인스턴스화 → Scene 뷰에 바로 렌더\n" +
+                        "(비교 분석 기능은 '🐍 Python 백엔드' 섹션에서 Start Server 후 사용)",
+                        EditorStyles.wordWrappedMiniLabel);
                 }
             }
-            if (removeIdx >= 0) _slots.RemoveAt(removeIdx);
+            EditorGUILayout.EndFoldoutHeaderGroup();
+            EditorGUILayout.Space(2);
+        }
 
-            using (new EditorGUILayout.HorizontalScope())
+        // ── Scenes ────────────────────────────────────────────────────────
+        void _ScenesSection()
+        {
+            _foldScenes = EditorGUILayout.BeginFoldoutHeaderGroup(_foldScenes, "📂 LCC Scenes");
+            if (_foldScenes)
             {
-                if (GUILayout.Button("+ 씬 추가")) _slots.Add(new SceneSlot());
-                if (GUILayout.Button("모두 지우기", GUILayout.Width(100))) _slots.Clear();
+                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                {
+                    int removeIdx = -1;
+                    for (int i = 0; i < _slots.Count; i++)
+                    {
+                        using (new EditorGUILayout.HorizontalScope())
+                        {
+                            _slots[i].enabled = EditorGUILayout.Toggle(_slots[i].enabled, GUILayout.Width(16));
+                            var picked = (LccScene)EditorGUILayout.ObjectField(_slots[i].scene, typeof(LccScene), false);
+                            if (picked != _slots[i].scene) { _slots[i].scene = picked; _selectedIndex = i; }
+                            GUI.enabled = _slots[i].scene != null;
+                            if (GUILayout.Button("▸", GUILayout.Width(24))) _selectedIndex = i;
+                            GUI.enabled = true;
+                            var prev = GUI.backgroundColor;
+                            GUI.backgroundColor = new Color(1f, 0.55f, 0.55f);
+                            if (GUILayout.Button("✕", GUILayout.Width(24))) removeIdx = i;
+                            GUI.backgroundColor = prev;
+                        }
+                    }
+                    if (removeIdx >= 0) _slots.RemoveAt(removeIdx);
+                    EditorGUILayout.Space(4);
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        if (GUILayout.Button("＋ Add slot", GUILayout.Height(22)))
+                            _slots.Add(new SceneSlot());
+                        if (GUILayout.Button("Clear all", GUILayout.Height(22), GUILayout.Width(90)))
+                            _slots.Clear();
+                    }
+                }
             }
-
-            // 활성 개수 표시
-            int active = 0; foreach (var s in _slots) if (s.enabled && s.scene != null) active++;
-            EditorGUILayout.LabelField($"활성 씬: {active} / {_slots.Count}",
-                                       EditorStyles.miniLabel);
+            EditorGUILayout.EndFoldoutHeaderGroup();
+            EditorGUILayout.Space(2);
         }
 
         // ── Render settings ───────────────────────────────────────────────
         void _RenderSettingsSection()
         {
-            EditorGUILayout.LabelField("Render Settings", EditorStyles.boldLabel);
-            _renderMode    = (RenderMode)EditorGUILayout.EnumPopup("모드", _renderMode);
-            _lodLevel      = EditorGUILayout.IntSlider("LOD", _lodLevel, 0, 4);
+            _foldRender = EditorGUILayout.BeginFoldoutHeaderGroup(_foldRender, "🎨 Render Settings");
+            if (_foldRender)
+            {
+                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                {
+                    _renderMode = (RenderMode)EditorGUILayout.EnumPopup(
+                        new GUIContent("모드", "Splat: 3D 가우시안 빌보드 · Point: 하드웨어 1px 포인트"), _renderMode);
 
-            if (_renderMode == RenderMode.PointCloud)
-            {
-                EditorGUILayout.LabelField("Point renderer 는 하드웨어 1 px 포인트. LOD 0 도 OK.", EditorStyles.miniLabel);
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        EditorGUILayout.LabelField("LOD", GUILayout.Width(40));
+                        _lodLevel = EditorGUILayout.IntSlider(_lodLevel, 0, 4);
+                    }
+                    string lodHint = _lodLevel switch
+                    {
+                        0 => "5.1M splats — 최고 디테일 (무거움)",
+                        1 => "2.6M splats",
+                        2 => "1.3M splats — 권장",
+                        3 => "642K splats",
+                        _ => "321K splats — 가장 가벼움",
+                    };
+                    EditorGUILayout.LabelField(lodHint, EditorStyles.miniLabel);
+
+                    if (_renderMode == RenderMode.SplatBillboard)
+                    {
+                        EditorGUILayout.Space(2);
+                        _scaleMultiplier = EditorGUILayout.Slider("Scale 배율", _scaleMultiplier, 0.2f, 5f);
+                        _opacityBoost    = EditorGUILayout.Slider("Opacity 부스트", _opacityBoost, 0f, 1f);
+                    }
+
+                    _tint = EditorGUILayout.ColorField("Tint", _tint);
+
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        _attachLodStreamer = EditorGUILayout.ToggleLeft(
+                            new GUIContent("LOD Streamer 부착",
+                                "카메라 거리 기반으로 LOD 자동 스위치 (히스테리시스 포함)"),
+                            _attachLodStreamer);
+                        _frameCameraAfterInstantiate = EditorGUILayout.ToggleLeft(
+                            new GUIContent("자동 카메라 프레이밍", "인스턴스화 직후 카메라 정렬"),
+                            _frameCameraAfterInstantiate);
+                    }
+                }
             }
-            else
-            {
-                EditorGUILayout.LabelField("Splat renderer 는 쿼드 4 verts/splat. LOD 4 권장 (메모리).", EditorStyles.miniLabel);
-                _scaleMultiplier = EditorGUILayout.Slider("Scale 배율", _scaleMultiplier, 0.2f, 5f);
-                _opacityBoost    = EditorGUILayout.Slider("Opacity 부스트", _opacityBoost, 0f, 1f);
-            }
-            _tint = EditorGUILayout.ColorField("Tint", _tint);
-            _frameCameraAfterInstantiate = EditorGUILayout.Toggle(
-                "인스턴스화 후 카메라 자동 프레이밍", _frameCameraAfterInstantiate);
+            EditorGUILayout.EndFoldoutHeaderGroup();
+            EditorGUILayout.Space(2);
         }
 
         // ── Actions ───────────────────────────────────────────────────────
         void _ActionsSection()
         {
-            EditorGUILayout.LabelField("Actions", EditorStyles.boldLabel);
-
-            if (GUILayout.Button("합치기 플랜 미리보기", GUILayout.Height(26)))
-                _PreviewMergePlan();
-
-            var activeSlots = _ActiveSlots();
-            using (new EditorGUI.DisabledScope(activeSlots.Count == 0))
+            _foldActions = EditorGUILayout.BeginFoldoutHeaderGroup(_foldActions, "⚡ Actions");
+            if (_foldActions)
             {
-                if (GUILayout.Button($"▶ 월드로 인스턴스화 ({activeSlots.Count} 씬)",
-                                     GUILayout.Height(32)))
-                    _Instantiate(activeSlots);
-            }
+                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                {
+                    var active = _ActiveSlots();
+                    var big = new GUIStyle(GUI.skin.button)
+                    { fontSize = 12, fontStyle = FontStyle.Bold, fixedHeight = 34 };
 
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                if (GUILayout.Button("기존 LCC GameObject 모두 제거"))
-                    _ClearAllInstances();
-                if (GUILayout.Button("포커스", GUILayout.Width(70)))
-                    _FrameCameraToExisting();
+                    using (new EditorGUI.DisabledScope(active.Count == 0))
+                    {
+                        var prev = GUI.backgroundColor;
+                        GUI.backgroundColor = new Color(0.45f, 0.85f, 0.55f);
+                        if (GUILayout.Button($"▶  월드로 인스턴스화  ({active.Count} 씬)", big))
+                            _Instantiate(active);
+                        GUI.backgroundColor = prev;
+                    }
+                    EditorGUILayout.Space(3);
+
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        if (GUILayout.Button("플랜 미리보기 (Console)", GUILayout.Height(24)))
+                            _PreviewMergePlan();
+                        if (GUILayout.Button("카메라 포커스", GUILayout.Height(24), GUILayout.Width(100)))
+                            _FrameCameraToExisting();
+                    }
+
+                    var redPrev = GUI.backgroundColor;
+                    GUI.backgroundColor = new Color(0.85f, 0.55f, 0.55f);
+                    if (GUILayout.Button("LCC GameObject 모두 제거", GUILayout.Height(22)))
+                        _ClearAllInstances();
+                    GUI.backgroundColor = redPrev;
+                }
             }
+            EditorGUILayout.EndFoldoutHeaderGroup();
+            EditorGUILayout.Space(2);
         }
 
+        // ── Python backend server ─────────────────────────────────────────
+        void _ServerSection()
+        {
+            _foldServer = EditorGUILayout.BeginFoldoutHeaderGroup(_foldServer,
+                $"🐍 Python 백엔드  ·  {(_serverHealthy ? "online" : "offline")}");
+            if (_foldServer)
+            {
+                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                {
+                    EditorGUILayout.LabelField(
+                        "실행.bat 의 Python 설치·실행을 창 안에서 처리. 3D 스캔 비교 기능을 쓰려면 이 서버가 필요합니다.",
+                        EditorStyles.wordWrappedMiniLabel);
+                    EditorGUILayout.Space(3);
+
+                    LccServerManager.PythonPath = EditorGUILayout.TextField(
+                        new GUIContent("Python", "'python' 이면 PATH 탐색. 절대 경로도 가능."),
+                        LccServerManager.PythonPath);
+                    LccServerManager.Port = EditorGUILayout.IntField(
+                        new GUIContent("Port", "기본 8001 — 충돌 시 변경"),
+                        LccServerManager.Port);
+
+                    EditorGUILayout.Space(3);
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        if (GUILayout.Button("1) Install deps", GUILayout.Height(26)))
+                            _InstallDeps();
+
+                        bool running = LccServerManager.IsRunning();
+                        var prev = GUI.backgroundColor;
+                        if (!running)
+                        {
+                            GUI.backgroundColor = new Color(0.45f, 0.85f, 0.55f);
+                            if (GUILayout.Button("2) Start server", GUILayout.Height(26)))
+                                _StartServer();
+                        }
+                        else
+                        {
+                            GUI.backgroundColor = new Color(0.85f, 0.55f, 0.55f);
+                            if (GUILayout.Button("Stop server", GUILayout.Height(26)))
+                                _StopServer();
+                        }
+                        GUI.backgroundColor = prev;
+
+                        if (GUILayout.Button("🔄 Health", GUILayout.Height(26), GUILayout.Width(90)))
+                            _HealthCheck();
+                        if (GUILayout.Button("📖 Docs", GUILayout.Height(26), GUILayout.Width(70)))
+                            LccServerManager.OpenBrowser();
+                    }
+
+                    EditorGUILayout.Space(3);
+                    if (!string.IsNullOrEmpty(_serverInfo))
+                        EditorGUILayout.LabelField("상태: " + _serverInfo, EditorStyles.miniLabel);
+
+                    if (!string.IsNullOrEmpty(_serverLog))
+                    {
+                        EditorGUILayout.LabelField("설치 로그 (끝 10줄):", EditorStyles.miniBoldLabel);
+                        var shown = _TailLines(_serverLog, 10);
+                        using (new EditorGUI.DisabledScope(true))
+                            EditorGUILayout.TextArea(shown, GUILayout.MinHeight(60));
+                    }
+                }
+            }
+            EditorGUILayout.EndFoldoutHeaderGroup();
+            EditorGUILayout.Space(2);
+        }
+
+        // ── v2 API compare ────────────────────────────────────────────────
+        void _ApiCompareSection()
+        {
+            _foldCompare = EditorGUILayout.BeginFoldoutHeaderGroup(_foldCompare, "📐 3D 스캔 비교 (Hausdorff)");
+            if (_foldCompare)
+            {
+                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                {
+                    using (new EditorGUI.DisabledScope(!_serverHealthy))
+                    {
+                        if (!_serverHealthy)
+                            EditorGUILayout.HelpBox("서버 오프라인 — 위 '🐍 Python 백엔드' 에서 Start 하세요.", MessageType.Warning);
+
+                        _cmpReferencePly = EditorGUILayout.TextField(
+                            new GUIContent("reference PLY",
+                                "기존 3D 스캔본 PLY 경로 (절대경로)"),
+                            _cmpReferencePly);
+                        using (new EditorGUILayout.HorizontalScope())
+                        {
+                            EditorGUILayout.LabelField("비교 LOD", GUILayout.Width(60));
+                            _cmpLod = EditorGUILayout.IntSlider(_cmpLod, 0, 4);
+                        }
+                        _cmpSample = EditorGUILayout.IntSlider("Sample N", _cmpSample, 10000, 500000);
+
+                        var sc = _SelectedScene();
+                        GUI.enabled = _serverHealthy && !_cmpBusy && sc != null
+                                      && !string.IsNullOrEmpty(_cmpReferencePly);
+                        var prev = GUI.backgroundColor;
+                        GUI.backgroundColor = new Color(0.55f, 0.75f, 1.0f);
+                        if (GUILayout.Button(_cmpBusy ? "⏳ 비교 중..." : "▶ 비교 실행",
+                                             GUILayout.Height(28)))
+                            _RunCompare(sc);
+                        GUI.backgroundColor = prev;
+                        GUI.enabled = true;
+                    }
+
+                    if (!string.IsNullOrEmpty(_cmpResult))
+                    {
+                        EditorGUILayout.Space(3);
+                        using (new EditorGUI.DisabledScope(true))
+                            EditorGUILayout.TextArea(_cmpResult, GUILayout.MinHeight(90));
+                    }
+                }
+            }
+            EditorGUILayout.EndFoldoutHeaderGroup();
+            EditorGUILayout.Space(2);
+        }
+
+        // ── Inspect selected scene ────────────────────────────────────────
+        void _InspectSelectedSection()
+        {
+            var s = _SelectedScene();
+            _foldSelected = EditorGUILayout.BeginFoldoutHeaderGroup(_foldSelected,
+                "🔍 Selected scene" + (s != null ? " · " + s.name : ""));
+            if (_foldSelected && s != null && s.manifest != null)
+            {
+                var m = s.manifest;
+                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                {
+                    EditorGUILayout.LabelField("name", m.name);
+                    EditorGUILayout.LabelField("totalSplats", m.totalSplats.ToString("N0"));
+                    EditorGUILayout.LabelField("source / type", $"{m.source} / {m.dataType}");
+                    if (m.boundingBox != null)
+                    {
+                        var sz = new Vector3(m.boundingBox.max[0] - m.boundingBox.min[0],
+                                             m.boundingBox.max[1] - m.boundingBox.min[1],
+                                             m.boundingBox.max[2] - m.boundingBox.min[2]);
+                        EditorGUILayout.LabelField("bbox size", $"{sz.x:F2} × {sz.y:F2} × {sz.z:F2} m");
+                    }
+                    EditorGUILayout.LabelField("data.bin",
+                        System.IO.File.Exists(s.DataBinPath) ? "✓ exists" : "✗ missing");
+                }
+            }
+            EditorGUILayout.EndFoldoutHeaderGroup();
+        }
+
+        // ── Helpers / actions ─────────────────────────────────────────────
         List<SceneSlot> _ActiveSlots()
         {
             var a = new List<SceneSlot>();
             foreach (var s in _slots) if (s.enabled && s.scene != null) a.Add(s);
             return a;
         }
+        LccScene _SelectedScene()
+            => (_selectedIndex >= 0 && _selectedIndex < _slots.Count) ? _slots[_selectedIndex].scene : null;
 
         void _PreviewMergePlan()
         {
@@ -184,20 +436,18 @@ namespace Virnect.Lcc.Editor
             foreach (var s in _ActiveSlots()) scenes.Add(s.scene);
             if (scenes.Count == 0) { ShowNotification(new GUIContent("씬이 없습니다.")); return; }
             var plan = LccSceneMerger.Plan(scenes);
-            Debug.Log($"[LCC] === 합치기 플랜 ({plan.Count} 씬) ===");
+            UnityEngine.Debug.Log($"[LCC] === 합치기 플랜 ({plan.Count} 씬) ===");
             foreach (var p in plan)
-                Debug.Log($"  {p.scene?.name} → world=({p.worldOffset.x:F2},{p.worldOffset.y:F2},{p.worldOffset.z:F2})  " +
-                          $"rot={p.rotation}  scale={p.scale}");
+                UnityEngine.Debug.Log($"  {p.scene?.name} → world=({p.worldOffset.x:F2},{p.worldOffset.y:F2},{p.worldOffset.z:F2}) " +
+                                      $"rot={p.rotation} scale={p.scale}");
             ShowNotification(new GUIContent($"플랜 출력 ({plan.Count}) → Console"));
         }
 
-        void _Instantiate(List<SceneSlot> activeSlots)
+        void _Instantiate(List<SceneSlot> active)
         {
-            var root = GameObject.Find("__LccRoot");
-            if (root == null) root = new GameObject("__LccRoot");
-
+            var root = GameObject.Find("__LccRoot") ?? new GameObject("__LccRoot");
             var scenes = new List<LccScene>();
-            foreach (var s in activeSlots) scenes.Add(s.scene);
+            foreach (var s in active) scenes.Add(s.scene);
             var plan = LccSceneMerger.Plan(scenes);
 
             int created = 0;
@@ -213,26 +463,30 @@ namespace Virnect.Lcc.Editor
                 if (_renderMode == RenderMode.SplatBillboard)
                 {
                     var r = go.AddComponent<LccSplatRenderer>();
-                    r.scene = p.scene;
-                    r.lodLevel = _lodLevel;
-                    r.scaleMultiplier = _scaleMultiplier;
-                    r.opacityBoost = _opacityBoost;
-                    r.tint = _tint;
+                    r.scene = p.scene; r.lodLevel = _lodLevel;
+                    r.scaleMultiplier = _scaleMultiplier; r.opacityBoost = _opacityBoost; r.tint = _tint;
                     r.enabled = false; r.enabled = true;
+                    if (_attachLodStreamer)
+                    {
+                        var s = go.AddComponent<LccLodStreamer>();
+                        s.targetRenderer = r;
+                    }
                 }
                 else
                 {
                     var r = go.AddComponent<LccPointCloudRenderer>();
-                    r.scene = p.scene;
-                    r.lodLevel = _lodLevel;
-                    r.tint = _tint;
+                    r.scene = p.scene; r.lodLevel = _lodLevel; r.tint = _tint;
                     r.enabled = false; r.enabled = true;
+                    if (_attachLodStreamer)
+                    {
+                        var s = go.AddComponent<LccLodStreamer>();
+                        s.targetRenderer = r;
+                    }
                 }
                 created++;
             }
-
             Undo.RegisterCreatedObjectUndo(root, "Instantiate LCC Scenes");
-            Debug.Log($"[LCC] Instantiated {created} scenes under '__LccRoot' ({_renderMode}, LOD {_lodLevel}).");
+            UnityEngine.Debug.Log($"[LCC] {created} scenes under __LccRoot ({_renderMode}, LOD {_lodLevel}).");
 
             if (_frameCameraAfterInstantiate) _FrameCameraToExisting();
             ShowNotification(new GUIContent($"{created} 씬 배치 완료"));
@@ -240,24 +494,19 @@ namespace Virnect.Lcc.Editor
 
         void _ClearAllInstances()
         {
-            var root = GameObject.Find("__LccRoot");
-            if (root != null) Undo.DestroyObjectImmediate(root);
-            // 이전 데모 오브젝트들도 정리
-            foreach (var n in new[] { "__LccTest", "__LccSplatTest",
-                                       "__LccMergeRoot", "__LccMerge_A", "__LccMerge_B" })
+            foreach (var n in new[] { "__LccRoot", "__LccMergeRoot", "__LccMerge_A", "__LccMerge_B",
+                                      "__LccTest", "__LccSplatTest" })
             {
                 var g = GameObject.Find(n);
                 if (g != null) Undo.DestroyObjectImmediate(g);
             }
-            ShowNotification(new GUIContent("LCC 오브젝트 제거 완료"));
+            ShowNotification(new GUIContent("LCC 오브젝트 제거"));
         }
 
         void _FrameCameraToExisting()
         {
             var root = GameObject.Find("__LccRoot");
             if (root == null) return;
-
-            // Combined bounds
             Bounds? combined = null;
             foreach (var r in root.GetComponentsInChildren<MeshRenderer>())
             {
@@ -265,84 +514,92 @@ namespace Virnect.Lcc.Editor
                 else { var b = combined.Value; b.Encapsulate(r.bounds); combined = b; }
             }
             if (!combined.HasValue) return;
-
-            var cam = Camera.main;
-            if (cam == null)
-            {
-                var camGO = GameObject.Find("Main Camera");
-                if (camGO != null) cam = camGO.GetComponent<Camera>();
-            }
-            if (cam == null) { Debug.LogWarning("[LCC] Main Camera 없음 — 프레이밍 스킵"); return; }
-
+            var cam = Camera.main ?? FindFirstObjectByType<Camera>();
+            if (cam == null) return;
             var c = combined.Value.center;
             float s = Mathf.Max(combined.Value.size.x, Mathf.Max(combined.Value.size.y, combined.Value.size.z));
             cam.transform.position = c + new Vector3(s * 0.9f, s * 0.6f, -s * 0.9f);
             cam.transform.LookAt(c);
             cam.nearClipPlane = 0.1f;
-            cam.farClipPlane  = Mathf.Max(cam.farClipPlane, s * 5f);
+            cam.farClipPlane = Mathf.Max(cam.farClipPlane, s * 5f);
             SceneView.lastActiveSceneView?.Frame(combined.Value, false);
         }
 
-        // ── v2 API (Hausdorff/chamfer compare) ─────────────────────────────
-        void _ApiCompareSection()
+        // ── Server actions ────────────────────────────────────────────────
+        void _HealthCheck()
         {
-            EditorGUILayout.LabelField("v2 API — 3D 스캔 비교 (Hausdorff / chamfer)", EditorStyles.boldLabel);
-
-            using (new EditorGUILayout.VerticalScope(GUI.skin.box))
+            _lastHealthTime = EditorApplication.timeSinceStartup;
+            LccServerManager.HealthCheckAsync((ok, msg) =>
             {
-                _apiBase = EditorGUILayout.TextField("API base",          _apiBase);
-                _cmpReferencePly = EditorGUILayout.TextField("reference PLY", _cmpReferencePly);
-                _cmpLod    = EditorGUILayout.IntSlider("비교 LOD", _cmpLod, 0, 4);
-                _cmpSample = EditorGUILayout.IntField("sample N", _cmpSample);
-
-                var selected = _SelectedScene();
-                GUI.enabled = !_cmpBusy && selected != null
-                              && selected.rootPath != null
-                              && !string.IsNullOrEmpty(_cmpReferencePly);
-                if (GUILayout.Button(_cmpBusy ? "⏳ 비교 중..." : "▶ 비교 실행", GUILayout.Height(28)))
-                    _RunCompare(selected);
-                GUI.enabled = true;
-
-                using (new EditorGUI.DisabledScope(true))
-                    EditorGUILayout.TextArea(_cmpResult, GUILayout.MinHeight(70));
-            }
-
-            if (GUI.changed) Repaint();
+                _serverHealthy = ok;
+                _serverInfo = ok ? (msg.Length > 140 ? msg.Substring(0, 140) + "..." : msg)
+                                 : (string.IsNullOrEmpty(msg) ? "offline" : "offline — " + msg);
+                Repaint();
+            });
         }
-
-        LccScene _SelectedScene()
+        void _StartServer()
         {
-            if (_selectedIndex < 0 || _selectedIndex >= _slots.Count) return null;
-            return _slots[_selectedIndex].scene;
+            if (!LccServerManager.ServerFilesExist())
+            {
+                EditorUtility.DisplayDialog("LCC",
+                    "Server~/ 폴더의 server.py 를 찾을 수 없습니다. 패키지 재설치가 필요합니다.", "OK");
+                return;
+            }
+            if (LccServerManager.StartServer(out var err))
+            {
+                EditorApplication.delayCall += () => { System.Threading.Thread.Sleep(1500); _HealthCheck(); };
+                ShowNotification(new GUIContent("server starting..."));
+            }
+            else UnityEngine.Debug.LogError("[LCC] start failed: " + err);
+        }
+        void _StopServer()
+        {
+            if (LccServerManager.StopServer(out var err)) { _serverHealthy = false; _serverInfo = "stopped"; Repaint(); }
+            else UnityEngine.Debug.LogError("[LCC] stop failed: " + err);
+        }
+        void _InstallDeps()
+        {
+            _serverLog = "running: python -m pip install -r requirements.txt ...\n";
+            Repaint();
+            EditorApplication.delayCall += () =>
+            {
+                int rc = LccServerManager.InstallDependencies(line =>
+                    { _serverLog += line + "\n"; Repaint(); });
+                _serverLog += rc == 0 ? "[ok] install complete\n" : $"[fail] exit {rc}\n";
+                Repaint();
+            };
+        }
+        static string _TailLines(string s, int n)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            var arr = s.Split('\n');
+            int start = System.Math.Max(0, arr.Length - n);
+            var sb = new StringBuilder();
+            for (int i = start; i < arr.Length; i++) sb.AppendLine(arr[i]);
+            return sb.ToString();
         }
 
+        // ── Compare ───────────────────────────────────────────────────────
         void _RunCompare(LccScene sc)
         {
             _cmpBusy = true;
-            _cmpResult = "요청 전송 중...\n" + _apiBase + "/api/lcc/compare";
-
+            _cmpResult = "요청 전송 중...";
             var payload = $"{{\"lcc_directory\":\"{sc.rootPath.Replace("\\","/")}\","
                         + $"\"reference_ply\":\"{_cmpReferencePly.Replace("\\","/")}\","
                         + $"\"lod\":{_cmpLod},\"sample\":{_cmpSample}}}";
 
-            var req = new UnityWebRequest(_apiBase + "/api/lcc/compare", "POST");
+            var req = new UnityWebRequest(LccServerManager.BaseUrl + "/api/lcc/compare", "POST");
             req.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(payload));
             req.downloadHandler = new DownloadHandlerBuffer();
             req.SetRequestHeader("Content-Type", "application/json");
             var op = req.SendWebRequest();
-
             op.completed += _ =>
             {
                 try
                 {
                     if (req.result != UnityWebRequest.Result.Success)
-                    {
-                        _cmpResult = "❌ " + req.error + "\n" + req.downloadHandler.text;
-                        return;
-                    }
-                    var text = req.downloadHandler.text;
-                    // 간단 파싱 (JsonUtility 용 DTO)
-                    var r = JsonUtility.FromJson<CompareResp>(text);
+                    { _cmpResult = "❌ " + req.error + "\n" + req.downloadHandler.text; return; }
+                    var r = JsonUtility.FromJson<CompareResp>(req.downloadHandler.text);
                     _cmpResult =
                         $"n_lcc = {r.n_lcc:N0}   n_ref = {r.n_ref:N0}\n" +
                         $"chamfer symmetric = {r.chamfer_symmetric:F4} m\n" +
@@ -359,65 +616,8 @@ namespace Virnect.Lcc.Editor
         [System.Serializable]
         class CompareResp
         {
-            public int n_lcc;
-            public int n_ref;
-            public float chamfer_symmetric;
-            public float hausdorff;
-            public float rms;
-            public float p50, p90, p99;
-            public float elapsed_sec;
-        }
-
-        // ── Inspector-like view for the selected scene ─────────────────────
-        void _InspectSelected()
-        {
-            if (_selectedIndex < 0 || _selectedIndex >= _slots.Count) return;
-            var s = _slots[_selectedIndex].scene;
-            if (s == null) return;
-
-            EditorGUILayout.LabelField($"Selected: {s.name}", EditorStyles.boldLabel);
-            var m = s.manifest;
-            if (m == null) { EditorGUILayout.HelpBox("매니페스트 파싱 실패", MessageType.Warning); return; }
-
-            using (new EditorGUILayout.VerticalScope(GUI.skin.box))
-            {
-                EditorGUILayout.LabelField("name", m.name ?? "-");
-                EditorGUILayout.LabelField("source/type", $"{m.source} / {m.dataType}");
-                EditorGUILayout.LabelField("totalSplats",
-                    m.totalSplats.ToString("N0") + $"  (LOD {m.totalLevel} 단계)");
-                if (m.splats != null)
-                {
-                    string sp = "";
-                    for (int i = 0; i < m.splats.Length; i++)
-                        sp += (i == 0 ? "" : ", ") + m.splats[i].ToString("N0");
-                    EditorGUILayout.LabelField("splats/LOD", sp);
-                }
-                if (m.boundingBox != null)
-                {
-                    EditorGUILayout.LabelField("bbox min",
-                        $"[{m.boundingBox.min[0]:F2}, {m.boundingBox.min[1]:F2}, {m.boundingBox.min[2]:F2}]");
-                    EditorGUILayout.LabelField("bbox max",
-                        $"[{m.boundingBox.max[0]:F2}, {m.boundingBox.max[1]:F2}, {m.boundingBox.max[2]:F2}]");
-                }
-                EditorGUILayout.LabelField("epsg / encoding", $"{m.epsg} / {m.encoding}");
-                EditorGUILayout.LabelField("rootPath", s.rootPath ?? "-");
-                EditorGUILayout.LabelField("data.bin",
-                    System.IO.File.Exists(s.DataBinPath) ? "✓ exists" : "✗ missing");
-            }
-
-            if (s.attrs != null)
-            {
-                using (new EditorGUILayout.VerticalScope(GUI.skin.box))
-                {
-                    EditorGUILayout.LabelField("attrs.lcp", EditorStyles.miniBoldLabel);
-                    if (s.attrs.transform?.position != null)
-                        EditorGUILayout.LabelField("transform.pos",
-                            $"[{s.attrs.transform.position[0]}, {s.attrs.transform.position[1]}, {s.attrs.transform.position[2]}]");
-                    if (s.attrs.spawnPoint?.position != null)
-                        EditorGUILayout.LabelField("spawnPoint.pos",
-                            $"[{s.attrs.spawnPoint.position[0]}, {s.attrs.spawnPoint.position[1]}, {s.attrs.spawnPoint.position[2]}]");
-                }
-            }
+            public int n_lcc, n_ref;
+            public float chamfer_symmetric, hausdorff, rms, p50, p90, p99, elapsed_sec;
         }
     }
 }
