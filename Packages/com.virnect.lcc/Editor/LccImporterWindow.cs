@@ -659,7 +659,12 @@ namespace Virnect.Lcc.Editor
                 LccV1Client.PostJsonReadSse(LccV1Client.BaseUrl + "/api/process/" + sid, body,
                     finalEvent => {
                         _V1AppendLog("✓ 파이프라인 완료: " + finalEvent);
-                        // Download chosen format
+                        // final event may carry its own session_id — use that for download
+                        string dlSid = sid;
+                        var m = System.Text.RegularExpressions.Regex.Match(finalEvent,
+                            "\"session_id\"\\s*:\\s*\"([^\"]+)\"");
+                        if (m.Success) dlSid = m.Groups[1].Value;
+
                         string ep = _meshFormat == "obj" ? "/api/mesh/"
                                   : _meshFormat == "fbx" ? "/api/mesh-fbx/"
                                   : "/api/mesh-glb/";
@@ -668,7 +673,7 @@ namespace Virnect.Lcc.Editor
                             : _v1OutputDir;
                         var savePath = Path.Combine(outDir,
                             LccV1Client.SafeStem(_v1InputFile) + "_mesh." + _meshFormat);
-                        LccV1Client.DownloadBinary(LccV1Client.BaseUrl + ep + sid, savePath,
+                        LccV1Client.DownloadBinary(LccV1Client.BaseUrl + ep + dlSid, savePath,
                             bytes => { _V1AppendLog($"✓ 저장: {savePath} ({bytes/1024.0:F0} KB)"); _V1SetBusy(false); },
                             e => { _V1AppendLog("❌ download: " + e); _V1SetBusy(false); });
                     },
