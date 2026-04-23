@@ -1,0 +1,12 @@
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+numpy>=1.24.0
+scipy>=1.11.0
+scikit-image>=0.21.0
+trimesh>=4.0.0
+open3d>=0.17.0
+pywebview>=4.4.0
+
+# File format support — LAS/LAZ (lazrs = Rust 기반 LAZ 디코더, laspy와 함께 설치)
+laspy[lazrs]>=2.4.0

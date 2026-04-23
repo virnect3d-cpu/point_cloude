@@ -1,0 +1,63 @@
+PointCloud Optimizer — 셀프 QA 체크리스트 (수동)
+
+[공통]
+□ 실행.bat 또는 run_desktop.py 로 앱 창이 뜨는가
+□ 오류 시 시스템 alert 대신 앱 안의 어두운 알림창이 뜨는가 (ESC 또는 확인으로 닫기)
+□ 탭 전환 시 뷰어/렉 이상 없음
+□ 다크 테마 통일 (1·2·3 페이지 모두 어두운 배경, 텍스트 가독)
+
+[1페이지 — 생략 가능 시 스킵]
+
+[2페이지 — 유니티 콜라이더] (2026-04-21 업데이트)
+□ .ply 드롭/선택 후 포인트 수 배지 갱신
+□ 로드 직후 백엔드 세션 자동 업로드 (백그라운드, 실패해도 박스 모드 가능)
+
+□ "⚡ 박스" 버튼 → AABB 1개 생성
+□ "🔶 메쉬" 버튼 → Poisson/BPA + ICP 기반 정밀 메쉬 생성 (기존 Convex Hull 제거됨)
+   · 정밀 옵션(⚙️) 펼쳐서 방식(Poisson/BPA), 깊이(6~10), 목표 삼각형, ICP 반복, ACD 분해 선택
+   · ACD 체크 시 여러 Convex 파트 반환 → Unity 동적 Rigidbody 호환
+   · Z-up 토글 켜면 Y-up 좌표계로 변환되어 콜라이더 생성
+
+□ 수동 박스 드래그 배치 동작
+□ 콜라이더 목록 / 삭제 / 실행취소 / 초기화 (박스·메쉬 모두)
+□ Unity JSON 내보내기 다운로드
+   · 새 스키마: mesh 콜라이더는 vertices + triangles 둘 다 포함
+   · convex_parts 모드일 때 각 파트가 독립 항목
+
+[3페이지 — 포인트 → 메쉬]  (2026-04-21 업데이트)
+□ 지원 포맷 업로드 후 "메쉬 변환 실행" 버튼 활성화
+□ 페이지 로드 시 LOD2 프리셋 자동 적용 (IM 기본 ON)
+□ 프리셋 3종 (LOD1/LOD2/LOD3):
+   · LOD1 : MC 저해상도 · 간단화만
+   · LOD2 : Poisson + Taubin + Instant Meshes 8K face (순수 Quad)
+   · LOD3 : Poisson + Taubin + ICP + Instant Meshes 15K face + 엣지보존 30°
+□ 고급 설정 — 알고리즘 라디오:
+   · Marching Cubes (splat, 기존)
+   · SDF Marching Cubes (거리장, 계단 현상 없음)
+   · Poisson (권장, watertight)
+   · Ball-Pivoting (BPA)
+□ ICP 정합 스냅 체크 → 반복 횟수 슬라이더 표시
+□ Poisson 선택 시 옥트리 깊이 슬라이더 노출
+□ 파이프라인 로그/SSE 단계 진행
+□ 완료 후 뷰어에 메쉬 표시, OBJ 저장 버튼 동작
+□ 와이어 토글(뷰어 상단 + 하단) 상태가 맞는가
+□ STEP 1 CLI 명령 복사 버튼 동작
+□ 로컬 OBJ만 드롭(변환 엔진 없이) → 뷰어 표시 (선택)
+
+[정확도/정합 개선 확인] — 실제 PLY로 눈으로 검증
+□ 기존 Convex Hull 방식 대비 page 2 메쉬 콜라이더가 오목한 영역까지 따라가는가
+□ page 3 Poisson + ICP 결과가 기존 MC보다 원본 포인트와 더 가깝게 붙는가
+□ SDF MC 결과의 계단 현상이 기존 MC보다 적은가
+
+[회귀]
+□ 업로드 확장자 거부 시 메시지 표시
+□ 4GB 초과 시 413 처리 (로컬 데스크톱 기준 한도)
+□ Open3D 미설치 시 Poisson/BPA 선택 → 명확한 에러 메시지
+□ 기존 Convex Hull 기반 JSON 포맷(legacy) 로드해도 목록 렌더링 OK
+
+[알려진 제한]
+· ACD 분해는 trimesh.decomposition 가용 시만 진짜 V-HACD 실행, 없으면 연결 성분 분리로 폴백
+· OBJ의 ngon/사각 face는 삼각형만 파서가 처리
+· Poisson depth 11은 매우 느리고 메모리 소모 큼
+
+작성일: 2026-04-21 (메쉬 정확도·UI 다크 통일 업데이트)

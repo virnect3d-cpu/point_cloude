@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>PointCloud Optimizer v2 — LCC Edition</title>
+<style>
+  :root {
+    --bg:#101218; --panel:#1b1f29; --text:#e8e8ef; --sub:#9099a8;
+    --accent:#7cd3ff; --ok:#65e39a; --warn:#ffc36a; --err:#ff7a87;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:Segoe UI,system-ui,sans-serif}
+  header{background:#0b0d12;border-bottom:1px solid #23283a;padding:16px 24px;display:flex;align-items:center;gap:14px}
+  h1{font-size:18px;margin:0}
+  .tag{font-size:11px;color:var(--accent);border:1px solid #2b415a;padding:2px 8px;border-radius:4px}
+  main{max-width:1024px;margin:20px auto;padding:0 20px;display:grid;grid-template-columns:1fr;gap:18px}
+  .card{background:var(--panel);border:1px solid #262b38;border-radius:10px;padding:18px 20px}
+  .card h2{font-size:14px;color:var(--accent);margin:0 0 10px;letter-spacing:.05em;text-transform:uppercase}
+  .row{display:grid;grid-template-columns:140px 1fr auto;gap:10px;align-items:center;margin-bottom:8px}
+  .row label{font-size:12px;color:var(--sub)}
+  .row input, .row select{background:#0f1219;border:1px solid #2a2f3c;color:var(--text);padding:7px 10px;border-radius:5px;font-size:13px;font-family:Consolas,monospace}
+  .row input{width:100%}
+  button{background:#2a85c8;color:#fff;border:none;border-radius:5px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer}
+  button:hover{background:#3aa3e8}
+  button.secondary{background:#2a2f3c}
+  pre{background:#0a0c12;border:1px solid #23283a;border-radius:6px;padding:12px;font-size:12px;line-height:1.55;overflow-x:auto;color:#e0e6f0;max-height:400px;overflow-y:auto}
+  .ok{color:var(--ok)} .err{color:var(--err)} .warn{color:var(--warn)}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-family:Consolas,monospace;font-size:12px}
+  .kv .k{color:var(--sub)}
+  .kv .v{color:#e8e8ef}
+</style>
+</head>
+<body>
+
+<header>
+  <div style="font-size:22px">⬡</div>
+  <h1>PointCloud Optimizer v2</h1>
+  <span class="tag">LCC edition</span>
+  <span id="hstatus" style="margin-left:auto;font-size:12px;color:var(--sub)">ping...</span>
+</header>
+
+<main>
+
+  <div class="card">
+    <h2>① LCC 디렉토리 정보</h2>
+    <div class="row">
+      <label>directory</label>
+      <input id="info-dir" value="C:/Users/jeongsomin/Desktop/LCC/LCC/lcc-result">
+      <button onclick="callInfo()">info</button>
+    </div>
+    <div id="info-out" class="kv"></div>
+  </div>
+
+  <div class="card">
+    <h2>② LCC 디코드 (LOD 선택)</h2>
+    <div class="row">
+      <label>directory</label>
+      <input id="dec-dir" value="C:/Users/jeongsomin/Desktop/LCC/LCC/lcc-result">
+      <span></span>
+    </div>
+    <div class="row">
+      <label>LOD</label>
+      <select id="dec-lod">
+        <option value="0">LOD 0 (full)</option>
+        <option value="1">LOD 1</option>
+        <option value="2" selected>LOD 2</option>
+        <option value="3">LOD 3</option>
+        <option value="4">LOD 4 (coarsest)</option>
+      </select>
+      <button onclick="callDecode()">decode</button>
+    </div>
+    <div id="dec-out" class="kv"></div>
+  </div>
+
+  <div class="card">
+    <h2>③ LCC ↔ reference PLY 비교</h2>
+    <div class="row">
+      <label>LCC dir</label>
+      <input id="cmp-dir" value="C:/Users/jeongsomin/Desktop/LCC/LCC/lcc-result">
+      <span></span>
+    </div>
+    <div class="row">
+      <label>reference PLY</label>
+      <input id="cmp-ref" value="C:/Users/jeongsomin/Desktop/LCC/LCC/mesh-files/ShinWon_1st_Cutter.ply">
+      <button onclick="callCompare()">compare</button>
+    </div>
+    <div class="row">
+      <label>LOD · sample</label>
+      <input id="cmp-lod" value="2" style="width:80px">
+      <input id="cmp-sample" value="200000">
+      <span></span>
+    </div>
+    <div id="cmp-out" class="kv"></div>
+  </div>
+
+  <div class="card">
+    <h2>Raw response</h2>
+    <pre id="raw">—</pre>
+  </div>
+
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+async function post(path, body){
+  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const txt = await r.text();
+  let j; try{ j = JSON.parse(txt); }catch{ j = {_raw:txt}; }
+  $('raw').textContent = JSON.stringify(j, null, 2);
+  if(!r.ok) throw new Error(`HTTP ${r.status}: ${j.detail || txt}`);
+  return j;
+}
+
+function renderKv(el, obj){
+  el.innerHTML = '';
+  for(const [k,v] of Object.entries(obj)){
+    const kd=document.createElement('div'); kd.className='k'; kd.textContent=k;
+    const vd=document.createElement('div'); vd.className='v';
+    vd.textContent = Array.isArray(v) ? '[' + v.map(x=>typeof x==='number'?x.toFixed(3):x).join(', ') + ']'
+                                      : typeof v==='number' ? v.toFixed(4) : String(v);
+    el.appendChild(kd); el.appendChild(vd);
+  }
+}
+
+async function callInfo(){
+  try {
+    const j = await post('/api/lcc/info', {directory: $('info-dir').value});
+    renderKv($('info-out'), j);
+  } catch(e){ $('info-out').innerHTML = `<div class="err">${e.message}</div>`; }
+}
+async function callDecode(){
+  $('dec-out').innerHTML='<div class="warn">decoding...</div>';
+  try {
+    const j = await post('/api/lcc/decode', {directory: $('dec-dir').value, lod: +$('dec-lod').value});
+    renderKv($('dec-out'), j);
+  } catch(e){ $('dec-out').innerHTML = `<div class="err">${e.message}</div>`; }
+}
+async function callCompare(){
+  $('cmp-out').innerHTML='<div class="warn">computing Hausdorff/chamfer...</div>';
+  try {
+    const j = await post('/api/lcc/compare', {
+      lcc_directory:$('cmp-dir').value, reference_ply:$('cmp-ref').value,
+      lod: +$('cmp-lod').value, sample: +$('cmp-sample').value});
+    renderKv($('cmp-out'), j);
+  } catch(e){ $('cmp-out').innerHTML = `<div class="err">${e.message}</div>`; }
+}
+
+// Initial ping
+fetch('/api/health').then(r => r.json())
+  .then(j => $('hstatus').textContent = `✓ connected · v${j.version||'?'}`)
+  .catch(e => $('hstatus').textContent = `✗ ${e.message}`);
+</script>
+</body>
+</html>

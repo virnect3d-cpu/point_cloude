@@ -1,0 +1,17 @@
+{
+  "name": "Virnect.Lcc.Editor",
+  "rootNamespace": "Virnect.Lcc.Editor",
+  "references": [
+    "Virnect.Lcc.Runtime",
+    "Unity.Mathematics"
+  ],
+  "includePlatforms": ["Editor"],
+  "excludePlatforms": [],
+  "allowUnsafeCode": true,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

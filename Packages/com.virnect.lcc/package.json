@@ -1,0 +1,26 @@
+{
+  "name": "com.virnect.lcc",
+  "version": "2.6.0-scaffold",
+  "displayName": "Virnect LCC Importer",
+  "description": "XGrids PortalCam .lcc (Gaussian Splats) Unity importer, renderer, and scene merger. Decodes LCC archives into point clouds and proxy meshes, supports merging multiple scenes in a shared EPSG coordinate system.",
+  "unity": "2022.3",
+  "documentationUrl": "https://github.com/virnect3d-cpu/point_cloude/blob/v2-main/docs/pipeline.md",
+  "changelogUrl": "https://github.com/virnect3d-cpu/point_cloude/blob/v2-main/Packages/com.virnect.lcc/CHANGELOG.md",
+  "licensesUrl": "https://github.com/virnect3d-cpu/point_cloude/blob/v2-main/LICENSE",
+  "keywords": ["lcc", "xgrids", "portalcam", "gaussian-splatting", "point-cloud", "scanner"],
+  "author": {
+    "name": "Virnect 3D",
+    "email": "virnect3d@gmail.com",
+    "url": "https://github.com/virnect3d-cpu"
+  },
+  "dependencies": {
+    "com.unity.mathematics": "1.3.2"
+  },
+  "samples": [
+    {
+      "displayName": "ShinWon Steel — 1st Cutter",
+      "description": "신원 스틸 공장동 예제 씬 (LCC 파일 포함 X — 내부 데이터).",
+      "path": "Samples~/ShinWon_1st_Cutter"
+    }
+  ]
+}
