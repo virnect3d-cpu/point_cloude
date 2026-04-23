@@ -1,0 +1,18 @@
+{
+    "name": "Virnect.MyPackage.Editor",
+    "rootNamespace": "Virnect.MyPackage.Editor",
+    "references": [
+        "Virnect.MyPackage"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

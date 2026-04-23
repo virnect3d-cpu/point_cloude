@@ -1,0 +1,25 @@
+{
+  "name": "com.virnect.mypackage",
+  "version": "1.0.0",
+  "displayName": "My Package",
+  "description": "Unity package installable via Git URL.",
+  "unity": "2021.3",
+  "unityRelease": "0f1",
+  "keywords": [
+    "virnect",
+    "utility"
+  ],
+  "author": {
+    "name": "VIRNECT",
+    "email": "support@virnect.com",
+    "url": "https://www.virnect.com"
+  },
+  "dependencies": {},
+  "samples": [
+    {
+      "displayName": "Basic Sample",
+      "description": "Basic usage example.",
+      "path": "Samples~/BasicSample"
+    }
+  ]
+}
