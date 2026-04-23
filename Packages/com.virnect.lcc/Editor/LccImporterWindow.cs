@@ -42,6 +42,10 @@ namespace Virnect.Lcc.Editor
         enum Tab { Scenes, Server, Compare, Info }
         Tab _tab = Tab.Scenes;
 
+        // Palette — 무채색 + 하늘색 포인트 컬러 (v1 실행파일 디자인 일치)
+        static readonly Color kAccent    = new Color(0.55f, 0.82f, 1.00f); // sky blue
+        static readonly Color kAccentDim = new Color(0.35f, 0.55f, 0.75f);
+
         // Server state
         bool   _serverHealthy = false;
         string _serverInfo = "";
@@ -108,7 +112,7 @@ namespace Virnect.Lcc.Editor
             { fixedHeight = 26, fontSize = 12 };
             var activeStyle = new GUIStyle(tabStyle)
             { fontStyle = FontStyle.Bold,
-              normal = { textColor = new Color(0.55f, 0.85f, 1.0f) } };
+              normal = { textColor = kAccent } };
 
             int active = 0; foreach (var s in _slots) if (s.enabled && s.scene != null) active++;
             string scenesLabel  = $"📂 Scenes ({_slots.Count})";
@@ -138,11 +142,11 @@ namespace Virnect.Lcc.Editor
                 GUILayout.Label("◆ Virnect LCC Importer",
                                 EditorStyles.toolbarButton, GUILayout.Width(175));
 
-                // Server status pill
+                // Server status pill (무채색 + 하늘색만)
                 string pill = _serverHealthy ? "● API online" : "○ API offline";
                 var style = new GUIStyle(EditorStyles.toolbarButton)
                 {
-                    normal = { textColor = _serverHealthy ? new Color(0.45f, 0.85f, 0.55f) : new Color(0.85f, 0.55f, 0.55f) },
+                    normal = { textColor = _serverHealthy ? kAccent : new Color(0.55f,0.55f,0.55f) },
                     alignment = TextAnchor.MiddleLeft, fontStyle = FontStyle.Bold
                 };
                 if (GUILayout.Button(pill, style, GUILayout.Width(110))) _HealthCheck();
@@ -196,10 +200,7 @@ namespace Virnect.Lcc.Editor
                             GUI.enabled = _slots[i].scene != null;
                             if (GUILayout.Button("▸", GUILayout.Width(24))) _selectedIndex = i;
                             GUI.enabled = true;
-                            var prev = GUI.backgroundColor;
-                            GUI.backgroundColor = new Color(1f, 0.55f, 0.55f);
                             if (GUILayout.Button("✕", GUILayout.Width(24))) removeIdx = i;
-                            GUI.backgroundColor = prev;
                         }
                     }
                     if (removeIdx >= 0) _slots.RemoveAt(removeIdx);
@@ -279,7 +280,7 @@ namespace Virnect.Lcc.Editor
                     using (new EditorGUI.DisabledScope(active.Count == 0))
                     {
                         var prev = GUI.backgroundColor;
-                        GUI.backgroundColor = new Color(0.45f, 0.85f, 0.55f);
+                        GUI.backgroundColor = kAccent;  // 하늘색 포인트 컬러
                         if (GUILayout.Button($"▶  월드로 인스턴스화  ({active.Count} 씬)", big))
                             _Instantiate(active);
                         GUI.backgroundColor = prev;
@@ -294,11 +295,9 @@ namespace Virnect.Lcc.Editor
                             _FrameCameraToExisting();
                     }
 
-                    var redPrev = GUI.backgroundColor;
-                    GUI.backgroundColor = new Color(0.85f, 0.55f, 0.55f);
+                    // 삭제 버튼은 무채색 (v1 처럼 강조 없음)
                     if (GUILayout.Button("LCC GameObject 모두 제거", GUILayout.Height(22)))
                         _ClearAllInstances();
-                    GUI.backgroundColor = redPrev;
                 }
             }
             EditorGUILayout.Space(2);
@@ -331,15 +330,14 @@ namespace Virnect.Lcc.Editor
 
                         bool running = LccServerManager.IsRunning();
                         var prev = GUI.backgroundColor;
+                        GUI.backgroundColor = running ? Color.white : kAccent;
                         if (!running)
                         {
-                            GUI.backgroundColor = new Color(0.45f, 0.85f, 0.55f);
                             if (GUILayout.Button("2) Start server", GUILayout.Height(26)))
                                 _StartServer();
                         }
                         else
                         {
-                            GUI.backgroundColor = new Color(0.85f, 0.55f, 0.55f);
                             if (GUILayout.Button("Stop server", GUILayout.Height(26)))
                                 _StopServer();
                         }
@@ -364,6 +362,34 @@ namespace Virnect.Lcc.Editor
                     }
                 }
             }
+            EditorGUILayout.Space(6);
+
+            // v1 실행파일 원클릭 기동 — 포인트 최적화 · 콜라이더 · 메쉬 변환 · 텍스처 베이크 · 사진 텍스처 5페이지
+            EditorGUILayout.LabelField("◆ v1 앱 (PointCloudOptimizer 실행파일)", EditorStyles.boldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField(
+                    "실행.bat 를 직접 실행해 v1 의 5 페이지(최적화 / 콜라이더 / 메쉬 변환 / 텍스처 베이크 / 사진 텍스처) 를 웹 창으로 엽니다.",
+                    EditorStyles.wordWrappedMiniLabel);
+                LccServerManager.V1BatPath = EditorGUILayout.TextField(
+                    new GUIContent("실행.bat 경로"), LccServerManager.V1BatPath);
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    var prev = GUI.backgroundColor;
+                    GUI.backgroundColor = kAccent;
+                    if (GUILayout.Button("▶  v1 앱 실행 (실행.bat)", GUILayout.Height(26)))
+                    {
+                        if (LccServerManager.LaunchV1App(out var err))
+                            ShowNotification(new GUIContent("v1 launched"));
+                        else UnityEngine.Debug.LogError("[LCC] v1 launch: " + err);
+                    }
+                    GUI.backgroundColor = prev;
+
+                    if (GUILayout.Button("v1 폴더 열기", GUILayout.Width(120), GUILayout.Height(26)))
+                        EditorUtility.RevealInFinder(LccServerManager.V1BatPath);
+                }
+            }
+
             EditorGUILayout.Space(2);
         }
 
@@ -394,7 +420,7 @@ namespace Virnect.Lcc.Editor
                         GUI.enabled = _serverHealthy && !_cmpBusy && sc != null
                                       && !string.IsNullOrEmpty(_cmpReferencePly);
                         var prev = GUI.backgroundColor;
-                        GUI.backgroundColor = new Color(0.55f, 0.75f, 1.0f);
+                        GUI.backgroundColor = kAccent;  // 하늘색 포인트 컬러 (주요 액션)
                         if (GUILayout.Button(_cmpBusy ? "⏳ 비교 중..." : "▶ 비교 실행",
                                              GUILayout.Height(28)))
                             _RunCompare(sc);

@@ -156,5 +156,35 @@ namespace Virnect.Lcc.Editor
         }
 
         public static void OpenBrowser() => Application.OpenURL(BaseUrl + "/docs");
+
+        // ── v1 실행파일 원클릭 기동 (PointCloudOptimizer_v3.0_260422) ──────
+        public const string V1PathPref = "Virnect.Lcc.V1BatPath";
+        public static string DefaultV1Bat =>
+            @"C:\Users\jeongsomin\Desktop\PointCloudOptimizer_v3.0_260422\PointCloudOptimizer_v3.0_260422\실행.bat";
+
+        public static string V1BatPath
+        {
+            get => EditorPrefs.GetString(V1PathPref, DefaultV1Bat);
+            set => EditorPrefs.SetString(V1PathPref, value);
+        }
+
+        public static bool LaunchV1App(out string error)
+        {
+            error = null;
+            string bat = V1BatPath;
+            if (!File.Exists(bat)) { error = "실행.bat not found: " + bat; return false; }
+            try
+            {
+                var psi = new ProcessStartInfo("cmd.exe", $"/c start \"v1 app\" \"{bat}\"")
+                {
+                    WorkingDirectory = Path.GetDirectoryName(bat),
+                    UseShellExecute = false,
+                    CreateNoWindow = false,
+                };
+                Process.Start(psi);
+                return true;
+            }
+            catch (Exception e) { error = e.Message; return false; }
+        }
     }
 }
