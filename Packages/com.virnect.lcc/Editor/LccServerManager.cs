@@ -17,8 +17,23 @@ namespace Virnect.Lcc.Editor
         public const string PythonPref  = "Virnect.Lcc.PythonPath";
         public const string PortPref    = "Virnect.Lcc.ServerPort";
         public const string PidPref     = "Virnect.Lcc.ServerPid";
+        public const string V1RootPref  = "Virnect.Lcc.V1Root";
         public const string DefaultPython = "python";
         public const int    DefaultPort   = 8001;
+
+        // v1 PointCloudOptimizer_v3.0_260422 설치 폴더 (실행.bat 가 있는 위치의 상위)
+        public static string DefaultV1Root =>
+            @"C:\Users\jeongsomin\Desktop\PointCloudOptimizer_v3.0_260422\PointCloudOptimizer_v3.0_260422\PointCloudOptimizer";
+        public static string V1Root
+        {
+            get => EditorPrefs.GetString(V1RootPref, DefaultV1Root);
+            set => EditorPrefs.SetString(V1RootPref, value);
+        }
+        public static string V1Venv =>
+            Path.Combine(V1Root, ".venv", "Scripts", "python.exe");
+
+        public static string V1EffectivePython
+            => File.Exists(V1Venv) ? V1Venv : PythonPath;
 
         public static string PythonPath
         {
@@ -104,27 +119,39 @@ namespace Virnect.Lcc.Editor
             }
         }
 
-        // ── Start server (detached — survives window close) ───────────────
+        // ── Start server (v1 full backend — 모든 5 페이지 기능 포함) ─────
         public static bool StartServer(out string error)
         {
             error = null;
-            if (!ServerFilesExist()) { error = "Server files not found at " + ServerFolder(); return false; }
             if (IsRunning()) { error = "already running (pid " + EditorPrefs.GetInt(PidPref, 0) + ")"; return false; }
+
+            string v1Root = V1Root;
+            string v1Py   = V1EffectivePython;
+            string appPath = Path.Combine(v1Root, "backend");
+            if (!Directory.Exists(appPath))
+            {
+                error = "v1 backend not found at " + appPath + "\n'Server' 탭의 'v1 루트 경로' 를 확인하세요.";
+                return false;
+            }
+            if (!File.Exists(v1Py))
+            {
+                error = "Python not found: " + v1Py;
+                return false;
+            }
+
             try
             {
-                var psi = new ProcessStartInfo(PythonPath,
-                    $"\"{ServerPy()}\" --host 127.0.0.1 --port {Port}")
+                var psi = new ProcessStartInfo(v1Py,
+                    $"-m uvicorn backend.app:app --host 127.0.0.1 --port {Port} --log-level warning")
                 {
-                    WorkingDirectory = ServerFolder(),
+                    WorkingDirectory = v1Root,
                     CreateNoWindow = true,
                     UseShellExecute = false,
-                    RedirectStandardOutput = false,
-                    RedirectStandardError  = false,
                 };
                 var proc = Process.Start(psi);
                 if (proc == null) { error = "Process.Start returned null"; return false; }
                 EditorPrefs.SetInt(PidPref, proc.Id);
-                Debug.Log($"[LCC] server started, pid={proc.Id}, port={Port}");
+                Debug.Log($"[LCC] v1 server started, pid={proc.Id}, port={Port}, root={v1Root}");
                 return true;
             }
             catch (Exception e) { error = e.Message; return false; }

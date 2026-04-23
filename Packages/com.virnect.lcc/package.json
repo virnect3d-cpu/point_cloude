@@ -1,6 +1,6 @@
 {
   "name": "com.virnect.lcc",
-  "version": "2.5.2-scaffold",
+  "version": "2.6.0-scaffold",
   "displayName": "Virnect LCC Importer",
   "description": "XGrids PortalCam .lcc (Gaussian Splats) Unity importer, renderer, and scene merger. Decodes LCC archives into point clouds and proxy meshes, supports merging multiple scenes in a shared EPSG coordinate system.",
   "unity": "2022.3",

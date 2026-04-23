@@ -38,9 +38,37 @@ namespace Virnect.Lcc.Editor
         bool  _attachLodStreamer = true;
         int _selectedIndex = -1;
 
-        // Tabs
-        enum Tab { Scenes, Server, Compare, Info }
+        // Tabs — LCC + v1 5-page 흡수
+        enum Tab { Scenes, Optimize, Collider, Mesh, Bake, Photo, Server, Compare, Info }
         Tab _tab = Tab.Scenes;
+
+        // ── v1 tab states ─────────────────────────────────────────────────
+        string _v1InputFile = "";
+        string _v1OutputDir = "";
+        bool   _v1Busy = false;
+        string _v1Log = "";
+        string _v1SessionId = "";
+
+        // Optimize (page 1)
+        bool _optQ60 = true, _optQ40 = true, _optQ20 = true;
+
+        // Mesh (page 3)
+        int   _meshPreset = 1;       // 0=LOD1, 1=LOD2, 2=LOD3
+        int   _meshSmoothHard = 0;   // 0=smooth, 1=hard
+        bool  _meshMirrorX = false;
+        string _meshFormat = "obj";  // obj / fbx / glb
+
+        // Bake (page 4)
+        string _bakePly = "", _bakeMesh = "";
+        int    _bakeRes = 2048;
+        bool   _bakeLighting = true, _bakeHdri = false;
+
+        // PhotoTex (page 5)
+        string _photoMesh = "", _photoImagesDir = "";
+        int    _photoRes = 2048;
+
+        // Collider (page 2)
+        string _colliderMode = "box";  // box / mesh
 
         // Palette — 무채색 + 하늘색 포인트 컬러 (v1 실행파일 디자인 일치)
         static readonly Color kAccent    = new Color(0.55f, 0.82f, 1.00f); // sky blue
@@ -87,20 +115,16 @@ namespace Virnect.Lcc.Editor
             switch (_tab)
             {
                 case Tab.Scenes:
-                    _ScenesSection();
-                    _RenderSettingsSection();
-                    _ActionsSection();
+                    _ScenesSection(); _RenderSettingsSection(); _ActionsSection();
                     break;
-                case Tab.Server:
-                    _ServerSection();
-                    break;
-                case Tab.Compare:
-                    _ApiCompareSection();
-                    break;
-                case Tab.Info:
-                    _QuickStartSection();
-                    _InspectSelectedSection();
-                    break;
+                case Tab.Optimize: _OptimizeTab();   break;
+                case Tab.Collider: _ColliderTab();   break;
+                case Tab.Mesh:     _MeshTab();       break;
+                case Tab.Bake:     _BakeTab();       break;
+                case Tab.Photo:    _PhotoTab();      break;
+                case Tab.Server:   _ServerSection(); break;
+                case Tab.Compare:  _ApiCompareSection(); break;
+                case Tab.Info:     _QuickStartSection(); _InspectSelectedSection(); break;
             }
             EditorGUILayout.EndScrollView();
         }
@@ -122,10 +146,15 @@ namespace Virnect.Lcc.Editor
 
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
-                _TabButton(Tab.Scenes,  scenesLabel,  tabStyle, activeStyle);
-                _TabButton(Tab.Server,  serverLabel,  tabStyle, activeStyle);
-                _TabButton(Tab.Compare, compareLabel, tabStyle, activeStyle);
-                _TabButton(Tab.Info,    infoLabel,    tabStyle, activeStyle);
+                _TabButton(Tab.Scenes,   scenesLabel,   tabStyle, activeStyle);
+                _TabButton(Tab.Optimize, "📦 최적화",     tabStyle, activeStyle);
+                _TabButton(Tab.Collider, "🎮 콜라이더",  tabStyle, activeStyle);
+                _TabButton(Tab.Mesh,     "🔺 메쉬 변환", tabStyle, activeStyle);
+                _TabButton(Tab.Bake,     "🖼 베이크",    tabStyle, activeStyle);
+                _TabButton(Tab.Photo,    "📷 사진텍스처", tabStyle, activeStyle);
+                _TabButton(Tab.Server,   serverLabel,   tabStyle, activeStyle);
+                _TabButton(Tab.Compare,  compareLabel,  tabStyle, activeStyle);
+                _TabButton(Tab.Info,     infoLabel,     tabStyle, activeStyle);
             }
         }
         void _TabButton(Tab t, string label, GUIStyle normal, GUIStyle active)
@@ -364,30 +393,27 @@ namespace Virnect.Lcc.Editor
             }
             EditorGUILayout.Space(6);
 
-            // v1 실행파일 원클릭 기동 — 포인트 최적화 · 콜라이더 · 메쉬 변환 · 텍스처 베이크 · 사진 텍스처 5페이지
-            EditorGUILayout.LabelField("◆ v1 앱 (PointCloudOptimizer 실행파일)", EditorStyles.boldLabel);
+            // v1 루트 폴더 설정 — v1 서버를 띄우려면 필요한 경로
+            EditorGUILayout.LabelField("◆ v1 백엔드 루트 (PointCloudOptimizer 폴더)", EditorStyles.boldLabel);
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
                 EditorGUILayout.LabelField(
-                    "실행.bat 를 직접 실행해 v1 의 5 페이지(최적화 / 콜라이더 / 메쉬 변환 / 텍스처 베이크 / 사진 텍스처) 를 웹 창으로 엽니다.",
+                    "'Start server' 를 누르면 이 폴더의 backend/app.py 를 uvicorn 으로 기동. 5페이지(최적화/콜라이더/메쉬/베이크/사진) 전 기능이 LCC Importer 의 각 탭에서 바로 사용 가능합니다.",
                     EditorStyles.wordWrappedMiniLabel);
-                LccServerManager.V1BatPath = EditorGUILayout.TextField(
-                    new GUIContent("실행.bat 경로"), LccServerManager.V1BatPath);
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    var prev = GUI.backgroundColor;
-                    GUI.backgroundColor = kAccent;
-                    if (GUILayout.Button("▶  v1 앱 실행 (실행.bat)", GUILayout.Height(26)))
+                    LccServerManager.V1Root = EditorGUILayout.TextField("v1 루트",
+                        LccServerManager.V1Root);
+                    if (GUILayout.Button("…", GUILayout.Width(32)))
                     {
-                        if (LccServerManager.LaunchV1App(out var err))
-                            ShowNotification(new GUIContent("v1 launched"));
-                        else UnityEngine.Debug.LogError("[LCC] v1 launch: " + err);
+                        var p = EditorUtility.OpenFolderPanel("v1 PointCloudOptimizer 폴더", "", "");
+                        if (!string.IsNullOrEmpty(p)) LccServerManager.V1Root = p.Replace("\\","/");
                     }
-                    GUI.backgroundColor = prev;
-
-                    if (GUILayout.Button("v1 폴더 열기", GUILayout.Width(120), GUILayout.Height(26)))
-                        EditorUtility.RevealInFinder(LccServerManager.V1BatPath);
                 }
+                EditorGUILayout.LabelField($"Python: {LccServerManager.V1EffectivePython}",
+                                           EditorStyles.miniLabel);
+                if (GUILayout.Button("v1 웹 UI 열기 (브라우저)", GUILayout.Height(22)))
+                    Application.OpenURL(LccServerManager.BaseUrl + "/");
             }
 
             EditorGUILayout.Space(2);
@@ -437,6 +463,284 @@ namespace Virnect.Lcc.Editor
                 }
             }
             EditorGUILayout.Space(2);
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        //  v1 흡수 탭들 — 백엔드는 LccServerManager 가 띄운 v1 full server
+        // ════════════════════════════════════════════════════════════════
+        void _V1CommonInputOutput()
+        {
+            EditorGUILayout.BeginHorizontal();
+            _v1InputFile = EditorGUILayout.TextField("입력 파일", _v1InputFile);
+            if (GUILayout.Button("…", GUILayout.Width(32)))
+            {
+                var p = EditorUtility.OpenFilePanel("포인트 클라우드 선택", "",
+                    "ply,xyz,pts,pcd,las,laz,obj,csv,txt,ptx");
+                if (!string.IsNullOrEmpty(p)) _v1InputFile = p.Replace("\\", "/");
+            }
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
+            _v1OutputDir = EditorGUILayout.TextField("출력 폴더", _v1OutputDir);
+            if (GUILayout.Button("…", GUILayout.Width(32)))
+            {
+                var p = EditorUtility.OpenFolderPanel("출력 폴더", "", "");
+                if (!string.IsNullOrEmpty(p)) _v1OutputDir = p.Replace("\\","/");
+            }
+            EditorGUILayout.EndHorizontal();
+        }
+
+        void _V1LogBox()
+        {
+            if (string.IsNullOrEmpty(_v1Log)) return;
+            EditorGUILayout.Space(3);
+            using (new EditorGUI.DisabledScope(true))
+                EditorGUILayout.TextArea(_v1Log, GUILayout.MinHeight(80));
+        }
+
+        bool _V1Ready()
+        {
+            if (!_serverHealthy) { EditorGUILayout.HelpBox("v1 서버 오프라인 — 'Server' 탭에서 Start Server.", MessageType.Warning); return false; }
+            return true;
+        }
+
+        void _V1AppendLog(string msg) { _v1Log += msg + "\n"; Repaint(); }
+        void _V1SetBusy(bool b) { _v1Busy = b; Repaint(); }
+
+        // ──────── 📦 OPTIMIZE (v1 page 1) ────────────────────────────────
+        void _OptimizeTab()
+        {
+            EditorGUILayout.LabelField("📦 포인트 클라우드 최적화 (v1 page 1)", EditorStyles.boldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                if (!_V1Ready()) return;
+                _V1CommonInputOutput();
+                EditorGUILayout.LabelField("생성할 품질 레벨", EditorStyles.miniBoldLabel);
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    _optQ60 = EditorGUILayout.ToggleLeft("60% (High)", _optQ60);
+                    _optQ40 = EditorGUILayout.ToggleLeft("40% (Medium)", _optQ40);
+                    _optQ20 = EditorGUILayout.ToggleLeft("20% (Low)", _optQ20);
+                }
+                EditorGUILayout.Space(4);
+                GUI.enabled = !_v1Busy && !string.IsNullOrEmpty(_v1InputFile);
+                var prev = GUI.backgroundColor; GUI.backgroundColor = kAccent;
+                if (GUILayout.Button(_v1Busy ? "⏳ 처리 중..." : "▶ 변환 시작 (automate)", GUILayout.Height(30)))
+                    _RunOptimize();
+                GUI.backgroundColor = prev; GUI.enabled = true;
+            }
+            _V1LogBox();
+        }
+
+        void _RunOptimize()
+        {
+            _V1SetBusy(true); _v1Log = ""; _V1AppendLog("업로드 중: " + _v1InputFile);
+            LccV1Client.UploadPath(_v1InputFile, (sid, err) =>
+            {
+                if (err != null) { _V1AppendLog("❌ upload: " + err); _V1SetBusy(false); return; }
+                _v1SessionId = sid; _V1AppendLog("sid=" + sid + " · 파이프라인 시작");
+                // v1 automate endpoint with quality levels
+                var levels = new List<int>();
+                if (_optQ60) levels.Add(60);
+                if (_optQ40) levels.Add(40);
+                if (_optQ20) levels.Add(20);
+                var body = "{\"quality_levels\":[" + string.Join(",", levels) + "]}";
+                LccV1Client.PostJsonReadSse(LccV1Client.BaseUrl + "/api/automate/" + sid, body,
+                    finalEvent => {
+                        _V1AppendLog("✓ done: " + finalEvent);
+                        // Output location hint
+                        _V1AppendLog("결과는 '" + (_v1OutputDir==""?"~/Downloads":_v1OutputDir) + "' 에 저장 (별도 다운로드 버튼 사용)");
+                        _V1SetBusy(false);
+                    },
+                    msg => { _V1AppendLog("❌ " + msg); _V1SetBusy(false); });
+            });
+        }
+
+        // ──────── 🎮 COLLIDER (v1 page 2) ────────────────────────────────
+        void _ColliderTab()
+        {
+            EditorGUILayout.LabelField("🎮 유니티 콜라이더 (v1 page 2)", EditorStyles.boldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                if (!_V1Ready()) return;
+                _V1CommonInputOutput();
+                _colliderMode = EditorGUILayout.Popup("모드",
+                    _colliderMode == "box" ? 0 : 1,
+                    new[] { "자동 박스 (AABB)", "자동 메쉬 (Poisson+ICP)" }) == 0 ? "box" : "mesh";
+                EditorGUILayout.HelpBox(
+                    "3D 뷰포트/드래그 배치는 Unity 에디터에 직접 통합되지 않아 웹 UI 사용을 권장합니다. 자동 생성 + JSON 다운로드는 여기서 지원.",
+                    MessageType.Info);
+                GUI.enabled = !_v1Busy && !string.IsNullOrEmpty(_v1InputFile);
+                var prev = GUI.backgroundColor; GUI.backgroundColor = kAccent;
+                if (GUILayout.Button(_v1Busy ? "⏳" : "▶ 자동 콜라이더 생성 + JSON 다운로드", GUILayout.Height(28)))
+                    _RunCollider();
+                GUI.backgroundColor = prev; GUI.enabled = true;
+                if (GUILayout.Button("웹 UI 에서 열기 (http://127.0.0.1:" + LccServerManager.Port + " → 2페이지)", GUILayout.Height(22)))
+                    Application.OpenURL(LccServerManager.BaseUrl + "/");
+            }
+            _V1LogBox();
+        }
+
+        void _RunCollider()
+        {
+            _V1SetBusy(true); _v1Log = "";
+            LccV1Client.UploadPath(_v1InputFile, (sid, err) =>
+            {
+                if (err != null) { _V1AppendLog("❌ " + err); _V1SetBusy(false); return; }
+                _V1AppendLog("sid=" + sid);
+                var url = LccV1Client.BaseUrl + "/api/mesh-collider/" + sid +
+                          "?method=poisson&depth=7&target_tris=3000&snap=2&convex_parts=false";
+                if (_colliderMode == "box")
+                    url = LccV1Client.BaseUrl + "/api/auto/collider/" + sid + "?mode=box";
+                var req = UnityWebRequest.Get(url); req.timeout = 600;
+                var op = req.SendWebRequest();
+                op.completed += _ =>
+                {
+                    try {
+                        if (req.result != UnityWebRequest.Result.Success)
+                        { _V1AppendLog("❌ HTTP " + req.responseCode); return; }
+                        string outDir = string.IsNullOrEmpty(_v1OutputDir)
+                            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads")
+                            : _v1OutputDir;
+                        Directory.CreateDirectory(outDir);
+                        var savePath = Path.Combine(outDir,
+                            LccV1Client.SafeStem(_v1InputFile) + "_collider.json");
+                        File.WriteAllText(savePath, req.downloadHandler.text);
+                        _V1AppendLog("✓ saved: " + savePath);
+                    } finally { req.Dispose(); _V1SetBusy(false); }
+                };
+            });
+        }
+
+        // ──────── 🔺 MESH (v1 page 3) ────────────────────────────────────
+        void _MeshTab()
+        {
+            EditorGUILayout.LabelField("🔺 포인트 → 메쉬 변환 (v1 page 3)", EditorStyles.boldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                if (!_V1Ready()) return;
+                _V1CommonInputOutput();
+                _meshPreset = GUILayout.Toolbar(_meshPreset, new[] { "LOD1 완전 로우", "LOD2 중간 (권장)", "LOD3 고품질" });
+                _meshSmoothHard = GUILayout.Toolbar(_meshSmoothHard, new[] { "스무스 (Poisson)", "하드 (Alpha)" });
+                _meshMirrorX = EditorGUILayout.ToggleLeft("X축 미러", _meshMirrorX);
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField("저장 포맷", GUILayout.Width(80));
+                    int fmtIdx = _meshFormat == "obj" ? 0 : (_meshFormat == "fbx" ? 1 : 2);
+                    fmtIdx = GUILayout.Toolbar(fmtIdx, new[] { "OBJ", "FBX", "GLB" });
+                    _meshFormat = fmtIdx == 0 ? "obj" : (fmtIdx == 1 ? "fbx" : "glb");
+                }
+                EditorGUILayout.Space(4);
+                GUI.enabled = !_v1Busy && !string.IsNullOrEmpty(_v1InputFile);
+                var prev = GUI.backgroundColor; GUI.backgroundColor = kAccent;
+                if (GUILayout.Button(_v1Busy ? "⏳ 메쉬 생성 중..." : "▶ 메쉬 변환 실행", GUILayout.Height(30)))
+                    _RunMesh();
+                GUI.backgroundColor = prev; GUI.enabled = true;
+            }
+            _V1LogBox();
+        }
+
+        void _RunMesh()
+        {
+            _V1SetBusy(true); _v1Log = ""; _V1AppendLog("업로드 중...");
+            LccV1Client.UploadPath(_v1InputFile, (sid, err) =>
+            {
+                if (err != null) { _V1AppendLog("❌ " + err); _V1SetBusy(false); return; }
+                _V1AppendLog("sid=" + sid + " · 파이프라인...");
+                // preset → (algorithm, mc_res, smooth_iter)
+                string algo = _meshSmoothHard == 0 ? "poisson" : "bpa";
+                int mcRes = new[] { 30, 45, 60 }[_meshPreset];
+                int smoothIter = new[] { 0, 2, 3 }[_meshPreset];
+                var body = $"{{\"algorithm\":\"{algo}\",\"denoise\":true,\"mc_res\":{mcRes}," +
+                           $"\"smooth\":true,\"smooth_iter\":{smoothIter},\"quadify\":false," +
+                           $"\"mirror_x\":{(_meshMirrorX?"true":"false")}}}";
+                LccV1Client.PostJsonReadSse(LccV1Client.BaseUrl + "/api/process/" + sid, body,
+                    finalEvent => {
+                        _V1AppendLog("✓ 파이프라인 완료: " + finalEvent);
+                        // Download chosen format
+                        string ep = _meshFormat == "obj" ? "/api/mesh/"
+                                  : _meshFormat == "fbx" ? "/api/mesh-fbx/"
+                                  : "/api/mesh-glb/";
+                        string outDir = string.IsNullOrEmpty(_v1OutputDir)
+                            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads")
+                            : _v1OutputDir;
+                        var savePath = Path.Combine(outDir,
+                            LccV1Client.SafeStem(_v1InputFile) + "_mesh." + _meshFormat);
+                        LccV1Client.DownloadBinary(LccV1Client.BaseUrl + ep + sid, savePath,
+                            bytes => { _V1AppendLog($"✓ 저장: {savePath} ({bytes/1024.0:F0} KB)"); _V1SetBusy(false); },
+                            e => { _V1AppendLog("❌ download: " + e); _V1SetBusy(false); });
+                    },
+                    msg => { _V1AppendLog("❌ " + msg); _V1SetBusy(false); });
+            });
+        }
+
+        // ──────── 🖼 BAKE (v1 page 4) ───────────────────────────────────
+        void _BakeTab()
+        {
+            EditorGUILayout.LabelField("🖼 텍스처 베이크 (v1 page 4)", EditorStyles.boldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                if (!_V1Ready()) return;
+                EditorGUILayout.BeginHorizontal();
+                _bakePly = EditorGUILayout.TextField("입력 PLY (색 포함)", _bakePly);
+                if (GUILayout.Button("…", GUILayout.Width(32))) {
+                    var p = EditorUtility.OpenFilePanel("PLY", "", "ply");
+                    if (!string.IsNullOrEmpty(p)) _bakePly = p.Replace("\\","/");
+                }
+                EditorGUILayout.EndHorizontal();
+                EditorGUILayout.BeginHorizontal();
+                _bakeMesh = EditorGUILayout.TextField("메쉬 OBJ/FBX/GLB", _bakeMesh);
+                if (GUILayout.Button("…", GUILayout.Width(32))) {
+                    var p = EditorUtility.OpenFilePanel("Mesh", "", "obj,fbx,glb");
+                    if (!string.IsNullOrEmpty(p)) _bakeMesh = p.Replace("\\","/");
+                }
+                EditorGUILayout.EndHorizontal();
+                _bakeRes = EditorGUILayout.IntPopup("해상도", _bakeRes,
+                    new[] { "512","1K","2K","4K" }, new[] { 512, 1024, 2048, 4096 });
+                _bakeLighting = EditorGUILayout.ToggleLeft("라이팅 베이크 (실사느낌)", _bakeLighting);
+                _bakeHdri = EditorGUILayout.ToggleLeft("HDRI 환경광 켜기", _bakeHdri);
+                EditorGUILayout.HelpBox("⚠ v1 의 텍스처 베이크는 bake/upload + bake/run 2단계. Editor 에서는 업로드 필드가 2개 필요해 간소화 실행만 지원 (실패 시 웹 UI 사용).",
+                    MessageType.Info);
+                GUI.enabled = !_v1Busy && !string.IsNullOrEmpty(_bakePly) && !string.IsNullOrEmpty(_bakeMesh);
+                var prev = GUI.backgroundColor; GUI.backgroundColor = kAccent;
+                if (GUILayout.Button(_v1Busy ? "⏳" : "▶ 텍스처 생성 (웹 UI 권장)", GUILayout.Height(26)))
+                    Application.OpenURL(LccServerManager.BaseUrl + "/");
+                GUI.backgroundColor = prev; GUI.enabled = true;
+            }
+            _V1LogBox();
+        }
+
+        // ──────── 📷 PHOTO TEX (v1 page 5) ──────────────────────────────
+        void _PhotoTab()
+        {
+            EditorGUILayout.LabelField("📷 사진 텍스처 투영 (v1 page 5)", EditorStyles.boldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                if (!_V1Ready()) return;
+                EditorGUILayout.BeginHorizontal();
+                _photoMesh = EditorGUILayout.TextField("메쉬 (OBJ/FBX/GLB/PLY)", _photoMesh);
+                if (GUILayout.Button("…", GUILayout.Width(32))) {
+                    var p = EditorUtility.OpenFilePanel("Mesh", "", "obj,fbx,glb,ply");
+                    if (!string.IsNullOrEmpty(p)) _photoMesh = p.Replace("\\","/");
+                }
+                EditorGUILayout.EndHorizontal();
+                EditorGUILayout.BeginHorizontal();
+                _photoImagesDir = EditorGUILayout.TextField("사진 폴더 (4~10장)", _photoImagesDir);
+                if (GUILayout.Button("…", GUILayout.Width(32))) {
+                    var p = EditorUtility.OpenFolderPanel("사진 폴더", "", "");
+                    if (!string.IsNullOrEmpty(p)) _photoImagesDir = p.Replace("\\","/");
+                }
+                EditorGUILayout.EndHorizontal();
+                _photoRes = EditorGUILayout.IntPopup("해상도", _photoRes,
+                    new[] { "1K","2K","4K" }, new[] { 1024, 2048, 4096 });
+                EditorGUILayout.HelpBox("⚠ SfM(COLMAP) + UV 언랩 단계가 무거워 5~10 분 소요. Editor 에서는 웹 UI 오픈만 지원.",
+                    MessageType.Info);
+                var prev = GUI.backgroundColor; GUI.backgroundColor = kAccent;
+                if (GUILayout.Button("▶ 웹 UI 의 5페이지에서 실행", GUILayout.Height(26)))
+                    Application.OpenURL(LccServerManager.BaseUrl + "/");
+                GUI.backgroundColor = prev;
+            }
+            _V1LogBox();
         }
 
         // ── Inspect selected scene ────────────────────────────────────────
