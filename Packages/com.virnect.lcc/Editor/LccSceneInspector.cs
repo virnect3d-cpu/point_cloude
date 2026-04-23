@@ -104,7 +104,13 @@ namespace Virnect.Lcc.Editor
             {
                 if (GUILayout.Button("LCC Importer 창 열기", GUILayout.Height(26)))
                     LccImporterWindow.Open();
-                if (GUILayout.Button("씬에 바로 추가 (Splat LOD 4)", GUILayout.Height(26)))
+                if (GUILayout.Button("🚀 Launch Playground…", GUILayout.Height(26)))
+                    LccPlaygroundWindow.Open(s);
+            }
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("씬에 Splat 만 추가 (LOD 4)", GUILayout.Height(22)))
                     _QuickInstantiate(s);
             }
         }
