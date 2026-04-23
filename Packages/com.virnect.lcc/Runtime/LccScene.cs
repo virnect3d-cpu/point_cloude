@@ -31,31 +31,50 @@ namespace Virnect.Lcc
             Path.Combine(Path.GetDirectoryName(rootPath) ?? "", "mesh-files", sceneName + ".ply");
 
         // LCC 드롭 구조가 제각각이라 (사용자가 lcc-result 만 복사하기도, 통째로 복사하기도)
-        // 후보 경로들을 순서대로 탐색. 프로젝트 상대 경로(Assets/...) 반환.
+        // + manifest.name 이 실제 파일명과 다른 경우도 있어서 (예: "XGrids Splats" vs "ShinWon_1st_Cutter")
+        // 이름 후보 × 경로 후보 조합을 순서대로 탐색.
         public string ResolveProxyMeshPlyAssetPath()
         {
             if (string.IsNullOrEmpty(rootPath)) return null;
-            string name = manifest?.name ?? this.name;
-            if (string.IsNullOrEmpty(name)) return null;
 
             string parent      = Path.GetDirectoryName(rootPath) ?? "";
             string grandparent = Path.GetDirectoryName(parent)   ?? "";
 
-            string[] candidates =
+            string[] nameCandidates =
             {
-                Path.Combine(rootPath, $"{name}.ply"),                // <root>/<name>.ply
-                Path.Combine(rootPath, "mesh-files", $"{name}.ply"),  // <root>/mesh-files/<name>.ply
-                Path.Combine(parent, "mesh-files", $"{name}.ply"),    // <parent>/mesh-files/<name>.ply (legacy)
-                Path.Combine(parent, $"{name}.ply"),                  // <parent>/<name>.ply
-                Path.Combine(grandparent, "mesh-files", $"{name}.ply"),
+                manifest?.name,
+                this.name,
+                Path.GetFileName(rootPath),   // LCC 드롭 폴더 이름 (가장 안정적)
             };
 
-            foreach (var rel in candidates)
+            string[] dirCandidates =
             {
-                string norm = rel.Replace('\\', '/');
-                string abs = Path.GetFullPath(norm);
-                if (File.Exists(abs)) return norm;
+                rootPath,
+                Path.Combine(rootPath, "mesh-files"),
+                Path.Combine(parent, "mesh-files"),
+                parent,
+                Path.Combine(grandparent, "mesh-files"),
+            };
+
+            // 1) 이름 × 디렉토리 조합
+            foreach (var name in nameCandidates)
+            {
+                if (string.IsNullOrEmpty(name)) continue;
+                foreach (var dir in dirCandidates)
+                {
+                    string norm = Path.Combine(dir, name + ".ply").Replace('\\', '/');
+                    string abs = Path.GetFullPath(norm);
+                    if (File.Exists(abs)) return norm;
+                }
             }
+
+            // 2) 이름 매칭 실패 시 — rootPath 에 .ply 가 딱 하나면 그거 사용
+            if (Directory.Exists(rootPath))
+            {
+                var plys = Directory.GetFiles(rootPath, "*.ply");
+                if (plys.Length == 1) return plys[0].Replace('\\', '/');
+            }
+
             return null;
         }
     }

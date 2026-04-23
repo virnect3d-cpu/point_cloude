@@ -17,6 +17,11 @@ namespace Virnect.Lcc.Editor
 
         [Range(0, 4)] int _lodLevel = 0;
         bool _addCollider = true;
+        bool _colorizeMesh = true;
+        int  _colorSourceLod = 3;         // 색상 소스 LOD — LOD3 (≈641K) 가 속도 대비 품질 좋음
+        float _colorizerCellSize = 1.0f;  // voxel grid cell (m)
+        int  _colorizerK = 6;             // k-NN 이웃 수
+        bool _hideSplatAfterColorize = false;
         bool _spawnCharacter = true;
         bool _frameCamera = true;
         bool _cleanLaunch = true;
@@ -180,6 +185,19 @@ namespace Virnect.Lcc.Editor
 
                 GUILayout.Space(6);
                 _addCollider    = EditorGUILayout.ToggleLeft("☑ Auto MeshCollider  (mesh-files/*.ply)", _addCollider);
+                using (new EditorGUI.DisabledScope(!_addCollider))
+                {
+                    EditorGUI.indentLevel++;
+                    _colorizeMesh = EditorGUILayout.ToggleLeft("🎨 Colorize Mesh  (k-NN from splat RGB)", _colorizeMesh);
+                    using (new EditorGUI.DisabledScope(!_colorizeMesh))
+                    {
+                        _colorSourceLod       = EditorGUILayout.IntSlider("  color source LOD", _colorSourceLod, 0, 4);
+                        _colorizerCellSize    = EditorGUILayout.Slider("  voxel cell (m)", _colorizerCellSize, 0.2f, 3f);
+                        _colorizerK           = EditorGUILayout.IntSlider("  k neighbors", _colorizerK, 1, 16);
+                        _hideSplatAfterColorize = EditorGUILayout.ToggleLeft("  hide splats after colorize", _hideSplatAfterColorize);
+                    }
+                    EditorGUI.indentLevel--;
+                }
                 _spawnCharacter = EditorGUILayout.ToggleLeft("☑ Spawn Third Person Character  (Invector LITE)", _spawnCharacter);
                 _frameCamera    = EditorGUILayout.ToggleLeft("☑ Frame Main Camera on bounds", _frameCamera);
                 _cleanLaunch    = EditorGUILayout.ToggleLeft("☑ Clean Launch  (기존 스폰 오브젝트 삭제)", _cleanLaunch);
@@ -301,9 +319,54 @@ namespace Virnect.Lcc.Editor
         }
 
         // ─────────── Launch ───────────
+        // 팝업 UI 없이 프로그래매틱하게 Playground 를 스폰하고 싶을 때 사용하는 엔트리.
+        // 테스트 / 메뉴 아이템 / 배치 임포트에서 호출.
+        public static GameObject QuickLaunch(
+            LccScene scene,
+            int lodLevel = 0,
+            bool addCollider = true,
+            bool spawnCharacter = true,
+            bool frameCamera = true,
+            bool cleanLaunch = true,
+            float heightOffset = 1f,
+            bool colorizeMesh = false,
+            int colorSourceLod = 3,
+            float colorizerCellSize = 1.0f,
+            int colorizerK = 6,
+            bool hideSplatAfterColorize = false)
+        {
+            var w = CreateInstance<LccPlaygroundWindow>();
+            try
+            {
+                w._target         = scene;
+                w._lodLevel       = lodLevel;
+                w._addCollider    = addCollider;
+                w._spawnCharacter = spawnCharacter;
+                w._frameCamera    = frameCamera;
+                w._cleanLaunch    = cleanLaunch;
+                w._heightOffset   = heightOffset;
+                w._colorizeMesh   = colorizeMesh;
+                w._colorSourceLod = colorSourceLod;
+                w._colorizerCellSize = colorizerCellSize;
+                w._colorizerK     = colorizerK;
+                w._hideSplatAfterColorize = hideSplatAfterColorize;
+                return w._LaunchCore();
+            }
+            finally
+            {
+                DestroyImmediate(w);
+            }
+        }
+
         void _Launch()
         {
-            if (_target == null) { Debug.LogError("[LccPlayground] No target scene."); return; }
+            _LaunchCore();
+            Close();
+        }
+
+        GameObject _LaunchCore()
+        {
+            if (_target == null) { Debug.LogError("[LccPlayground] No target scene."); return null; }
 
             if (_cleanLaunch) _CleanExisting();
 
@@ -338,6 +401,17 @@ namespace Virnect.Lcc.Editor
                         mc.sharedMesh = mesh;
                         Undo.RegisterCreatedObjectUndo(colGO, "LCC Playground · Collider");
                         Debug.Log($"[LccPlayground] MeshCollider · {mesh.vertexCount:N0} verts / {mesh.triangles.Length / 3:N0} tris");
+
+                        // 2b. Colorized visualization mesh (splat RGB → vertex color)
+                        if (_colorizeMesh)
+                        {
+                            _SpawnColoredMesh(mesh, splatGO);
+                            if (_hideSplatAfterColorize)
+                            {
+                                var mr = splatGO.GetComponent<MeshRenderer>();
+                                if (mr != null) mr.enabled = false;
+                            }
+                        }
                     }
                     catch (System.Exception ex)
                     {
@@ -363,9 +437,51 @@ namespace Virnect.Lcc.Editor
 
             EditorSceneManager.MarkSceneDirty(splatGO.scene);
             Selection.activeGameObject = player != null ? player : splatGO;
-            Close();
 
             Debug.Log($"[LccPlayground] Launched · scene='{_target.name}' · LOD {_lodLevel} · collider={_addCollider} · character={_spawnCharacter}");
+            return splatGO;
+        }
+
+        void _SpawnColoredMesh(Mesh colliderMesh, GameObject splatGO)
+        {
+            try
+            {
+                // colliderMesh 는 MeshCollider.sharedMesh 로 이미 참조됨 → 별도 Mesh 인스턴스 복제
+                // (colors32 쓰는 순간 collider 쪽 인스턴싱 발동하는 걸 피하려고 분리)
+                var vizMesh = new Mesh { name = colliderMesh.name + "_colored", indexFormat = colliderMesh.indexFormat };
+                vizMesh.vertices  = colliderMesh.vertices;
+                vizMesh.triangles = colliderMesh.triangles;
+                vizMesh.RecalculateBounds();
+                vizMesh.RecalculateNormals();
+
+                double t0 = EditorApplication.timeSinceStartup;
+                var splats = LccSplatDecoder.DecodeLod(_target, _colorSourceLod);
+                double t1 = EditorApplication.timeSinceStartup;
+
+                var opts = LccMeshColorizer.Options.Default;
+                opts.cellSize = _colorizerCellSize;
+                opts.k = _colorizerK;
+                opts.maxRadius = _colorizerCellSize * 3f;
+
+                LccMeshColorizer.Colorize(vizMesh, splats, opts);
+                double t2 = EditorApplication.timeSinceStartup;
+
+                var vizGO = new GameObject("__LccColoredMesh");
+                vizGO.transform.SetParent(splatGO.transform, false);
+                var mf = vizGO.AddComponent<MeshFilter>();
+                mf.sharedMesh = vizMesh;
+                var mr = vizGO.AddComponent<MeshRenderer>();
+                var shader = Shader.Find("Virnect/LccVertexColorUnlit");
+                if (shader == null) shader = Shader.Find("Universal Render Pipeline/Unlit");
+                mr.sharedMaterial = new Material(shader) { name = "LccColored_" + _target.name };
+
+                Undo.RegisterCreatedObjectUndo(vizGO, "LCC Playground · Colored Mesh");
+                Debug.Log($"[LccPlayground] ColoredMesh · {vizMesh.vertexCount:N0} verts · decode {(t1 - t0) * 1000:F0} ms · colorize {(t2 - t1) * 1000:F0} ms · LOD {_colorSourceLod} ({splats.Length:N0} splats)");
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"[LccPlayground] Colorize 실패: {ex.Message}\n{ex.StackTrace}");
+            }
         }
 
         void _CleanExisting()
