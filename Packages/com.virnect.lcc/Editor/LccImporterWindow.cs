@@ -54,16 +54,22 @@ namespace Virnect.Lcc.Editor
         // Optimize (page 1)
         bool _optQ60 = true, _optQ40 = true, _optQ20 = true;
 
-        // Mesh (page 3)
-        int   _meshPreset = 1;       // 0=LOD1, 1=LOD2, 2=LOD3
-        int   _meshSmoothHard = 0;   // 0=smooth, 1=hard
-        bool  _meshMirrorX = false;
-        string _meshFormat = "obj";  // obj / fbx / glb
+        // Mesh (page 3 — collider-mesh native pipeline)
+        string _meshOutputDir = "Assets/LCC_Generated";
+        string _meshLastSaved = "";
 
-        // Bake (page 4)
-        string _bakePly = "", _bakeMesh = "";
-        int    _bakeRes = 2048;
-        bool   _bakeLighting = true, _bakeHdri = false;
+        // Bake (page 4 — in-editor k-NN colorize)
+        enum BakeColorSource { SplatDataBin, ExternalPly }
+        BakeColorSource _bakeSource = BakeColorSource.SplatDataBin;
+        int    _bakeLod = 0;          // splat source LOD
+        string _bakeExternalPly = ""; // external PLY path
+        bool   _bakePhotoReal = true; // preset on by default
+        int    _bakeK = 3;
+        float  _bakeCellSize = 0.3f;
+        bool   _bakeUseOpacity = true;
+        float  _bakeFalloff = 2f;
+        string _bakeMeshAsset = "";   // target mesh .asset path (from Mesh tab output)
+        string _bakeLastSaved = "";
 
         // PhotoTex (page 5)
         string _photoMesh = "", _photoImagesDir = "";
@@ -633,104 +639,236 @@ namespace Virnect.Lcc.Editor
         // ──────── 🔺 MESH (v1 page 3) ────────────────────────────────────
         void _MeshTab()
         {
-            EditorGUILayout.LabelField("🔺 포인트 → 메쉬 변환 (v1 page 3)", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("🔺 메쉬 생성 — 콜라이더 프록시 PLY → Unity Mesh", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "v1 의 Poisson/BPA Python 파이프라인 대신, XGrids 가 LCC 와 함께 제공한 프록시 메쉬 " +
+                "(MeshCollider 와 동일한 surface) 를 Unity Mesh 에셋으로 저장합니다. " +
+                "이후 Bake 탭에서 splat 색상을 올려 컬러 메쉬 완성.",
+                MessageType.Info);
+
+            var scene = _SelectedScene();
+            if (scene == null)
+            {
+                EditorGUILayout.HelpBox("Scenes 탭에서 ▸ 로 씬을 선택해주세요.", MessageType.Warning);
+                return;
+            }
+
+            string plyAssetPath = scene.ResolveProxyMeshPlyAssetPath();
+            bool plyFound = !string.IsNullOrEmpty(plyAssetPath);
+
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                if (!_V1Ready()) return;
-                _V1CommonInputOutput();
-                _meshPreset = GUILayout.Toolbar(_meshPreset, new[] { "LOD1 완전 로우", "LOD2 중간 (권장)", "LOD3 고품질" });
-                _meshSmoothHard = GUILayout.Toolbar(_meshSmoothHard, new[] { "스무스 (Poisson)", "하드 (Alpha)" });
-                _meshMirrorX = EditorGUILayout.ToggleLeft("X축 미러", _meshMirrorX);
+                EditorGUILayout.LabelField("대상 씬", scene.name);
+                EditorGUILayout.LabelField("proxy PLY",
+                    plyFound ? plyAssetPath + "  ✓" : "찾지 못함",
+                    EditorStyles.wordWrappedMiniLabel);
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    EditorGUILayout.LabelField("저장 포맷", GUILayout.Width(80));
-                    int fmtIdx = _meshFormat == "obj" ? 0 : (_meshFormat == "fbx" ? 1 : 2);
-                    fmtIdx = GUILayout.Toolbar(fmtIdx, new[] { "OBJ", "FBX", "GLB" });
-                    _meshFormat = fmtIdx == 0 ? "obj" : (fmtIdx == 1 ? "fbx" : "glb");
+                    _meshOutputDir = EditorGUILayout.TextField("출력 폴더 (Assets/...)", _meshOutputDir);
+                    if (GUILayout.Button("📁", GUILayout.Width(28)))
+                    {
+                        var picked = EditorUtility.OpenFolderPanel("Output folder (inside project)",
+                            Path.GetFullPath("Assets"), "");
+                        if (!string.IsNullOrEmpty(picked))
+                        {
+                            var proj = Path.GetFullPath(".");
+                            if (picked.StartsWith(proj)) _meshOutputDir = "Assets" + picked.Substring(proj.Length + "Assets".Length).Replace('\\', '/');
+                        }
+                    }
                 }
                 EditorGUILayout.Space(4);
-                GUI.enabled = !_v1Busy && !string.IsNullOrEmpty(_v1InputFile);
-                var prev = GUI.backgroundColor; GUI.backgroundColor = kAccent;
-                if (GUILayout.Button(_v1Busy ? "⏳ 메쉬 생성 중..." : "▶ 메쉬 변환 실행", GUILayout.Height(30)))
-                    _RunMesh();
-                GUI.backgroundColor = prev; GUI.enabled = true;
+                using (new EditorGUI.DisabledScope(!plyFound))
+                {
+                    var prev = GUI.backgroundColor; GUI.backgroundColor = kAccent;
+                    if (GUILayout.Button("▶ 프록시 PLY → Mesh 에셋 생성", GUILayout.Height(30)))
+                        _RunMeshFromCollider(scene, plyAssetPath);
+                    GUI.backgroundColor = prev;
+                }
+
+                if (!string.IsNullOrEmpty(_meshLastSaved))
+                    EditorGUILayout.HelpBox("✓ 저장됨: " + _meshLastSaved, MessageType.None);
             }
-            _V1LogBox();
         }
 
-        void _RunMesh()
+        void _RunMeshFromCollider(LccScene scene, string plyAssetPath)
         {
-            _V1SetBusy(true); _v1Log = ""; _V1AppendLog("업로드 중...");
-            LccV1Client.UploadPath(_v1InputFile, (sid, err) =>
+            try
             {
-                if (err != null) { _V1AppendLog("❌ " + err); _V1SetBusy(false); return; }
-                _V1AppendLog("sid=" + sid + " · 파이프라인...");
-                // preset → (algorithm, mc_res, smooth_iter)
-                string algo = _meshSmoothHard == 0 ? "poisson" : "bpa";
-                int mcRes = new[] { 30, 45, 60 }[_meshPreset];
-                int smoothIter = new[] { 0, 2, 3 }[_meshPreset];
-                var body = $"{{\"algorithm\":\"{algo}\",\"denoise\":true,\"mc_res\":{mcRes}," +
-                           $"\"smooth\":true,\"smooth_iter\":{smoothIter},\"quadify\":false," +
-                           $"\"mirror_x\":{(_meshMirrorX?"true":"false")}}}";
-                LccV1Client.PostJsonReadSse(LccV1Client.BaseUrl + "/api/process/" + sid, body,
-                    finalEvent => {
-                        _V1AppendLog("✓ 파이프라인 완료: " + finalEvent);
-                        // final event may carry its own session_id — use that for download
-                        string dlSid = sid;
-                        var m = System.Text.RegularExpressions.Regex.Match(finalEvent,
-                            "\"session_id\"\\s*:\\s*\"([^\"]+)\"");
-                        if (m.Success) dlSid = m.Groups[1].Value;
+                string plyAbs = Path.GetFullPath(plyAssetPath);
+                var mesh = LccMeshPlyLoader.Load(plyAbs);
+                mesh.name = scene.name + "_ProxyMesh";
 
-                        string ep = _meshFormat == "obj" ? "/api/mesh/"
-                                  : _meshFormat == "fbx" ? "/api/mesh-fbx/"
-                                  : "/api/mesh-glb/";
-                        string outDir = string.IsNullOrEmpty(_v1OutputDir)
-                            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads")
-                            : _v1OutputDir;
-                        var savePath = Path.Combine(outDir,
-                            LccV1Client.SafeStem(_v1InputFile) + "_mesh." + _meshFormat);
-                        LccV1Client.DownloadBinary(LccV1Client.BaseUrl + ep + dlSid, savePath,
-                            bytes => { _V1AppendLog($"✓ 저장: {savePath} ({bytes/1024.0:F0} KB)"); _V1SetBusy(false); },
-                            e => { _V1AppendLog("❌ download: " + e); _V1SetBusy(false); });
-                    },
-                    msg => { _V1AppendLog("❌ " + msg); _V1SetBusy(false); });
-            });
+                Directory.CreateDirectory(_meshOutputDir);
+                string dst = $"{_meshOutputDir}/{mesh.name}.asset";
+                AssetDatabase.CreateAsset(mesh, dst);
+                AssetDatabase.SaveAssets();
+                AssetDatabase.Refresh();
+
+                _meshLastSaved = dst;
+                _bakeMeshAsset = dst;   // Bake 탭 자동 전달
+                Debug.Log($"[LccImporter] Mesh asset saved: {dst} · {mesh.vertexCount:N0} verts / {mesh.triangles.Length / 3:N0} tris");
+                Selection.activeObject = mesh;
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"[LccImporter] Mesh 생성 실패: {ex.Message}");
+            }
         }
 
         // ──────── 🖼 BAKE (v1 page 4) ───────────────────────────────────
         void _BakeTab()
         {
-            EditorGUILayout.LabelField("🖼 텍스처 베이크 (v1 page 4)", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("🎨 컬러 베이크 — splat RGB → Mesh.colors32", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "Mesh 탭에서 생성한 프록시 메쉬에 Gaussian Splat 의 색상을 k-NN 으로 투영. " +
+                "v1 Python 베이크 (웹 UI) 는 제거되고 Unity Editor 내부에서 몇 초에 완료됩니다. " +
+                "결과물: 버텍스 컬러 메쉬 + LccVertexColorUnlit 매터리얼.",
+                MessageType.Info);
+
+            var scene = _SelectedScene();
+            if (scene == null)
+            {
+                EditorGUILayout.HelpBox("Scenes 탭에서 ▸ 로 씬을 선택해주세요.", MessageType.Warning);
+                return;
+            }
+
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                if (!_V1Ready()) return;
-                EditorGUILayout.BeginHorizontal();
-                _bakePly = EditorGUILayout.TextField("입력 PLY (색 포함)", _bakePly);
-                if (GUILayout.Button("…", GUILayout.Width(32))) {
-                    var p = EditorUtility.OpenFilePanel("PLY", "", "ply");
-                    if (!string.IsNullOrEmpty(p)) _bakePly = p.Replace("\\","/");
+                // 대상 메쉬
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    _bakeMeshAsset = EditorGUILayout.TextField("대상 Mesh 에셋", _bakeMeshAsset);
+                    if (GUILayout.Button("…", GUILayout.Width(28)))
+                    {
+                        string picked = EditorUtility.OpenFilePanel("Mesh asset", "Assets/", "asset");
+                        if (!string.IsNullOrEmpty(picked))
+                        {
+                            var proj = Path.GetFullPath(".");
+                            if (picked.StartsWith(proj.Replace('\\','/')) || picked.StartsWith(proj))
+                                _bakeMeshAsset = "Assets" + picked.Replace('\\','/').Substring(proj.Replace('\\','/').Length + "Assets".Length);
+                        }
+                    }
                 }
-                EditorGUILayout.EndHorizontal();
-                EditorGUILayout.BeginHorizontal();
-                _bakeMesh = EditorGUILayout.TextField("메쉬 OBJ/FBX/GLB", _bakeMesh);
-                if (GUILayout.Button("…", GUILayout.Width(32))) {
-                    var p = EditorUtility.OpenFilePanel("Mesh", "", "obj,fbx,glb");
-                    if (!string.IsNullOrEmpty(p)) _bakeMesh = p.Replace("\\","/");
+
+                EditorGUILayout.Space(4);
+
+                // PhotoReal toggle
+                bool prevPr = _bakePhotoReal;
+                _bakePhotoReal = EditorGUILayout.ToggleLeft("✨ PhotoReal preset  (LOD0 · k=3 · opacity · inverse-square)", _bakePhotoReal);
+                if (_bakePhotoReal && !prevPr)
+                {
+                    _bakeSource = BakeColorSource.SplatDataBin;
+                    _bakeLod = 0;
+                    _bakeK = 3;
+                    _bakeCellSize = 0.3f;
+                    _bakeUseOpacity = true;
+                    _bakeFalloff = 2f;
                 }
-                EditorGUILayout.EndHorizontal();
-                _bakeRes = EditorGUILayout.IntPopup("해상도", _bakeRes,
-                    new[] { "512","1K","2K","4K" }, new[] { 512, 1024, 2048, 4096 });
-                _bakeLighting = EditorGUILayout.ToggleLeft("라이팅 베이크 (실사느낌)", _bakeLighting);
-                _bakeHdri = EditorGUILayout.ToggleLeft("HDRI 환경광 켜기", _bakeHdri);
-                EditorGUILayout.HelpBox("⚠ v1 의 텍스처 베이크는 bake/upload + bake/run 2단계. Editor 에서는 업로드 필드가 2개 필요해 간소화 실행만 지원 (실패 시 웹 UI 사용).",
-                    MessageType.Info);
-                GUI.enabled = !_v1Busy && !string.IsNullOrEmpty(_bakePly) && !string.IsNullOrEmpty(_bakeMesh);
-                var prev = GUI.backgroundColor; GUI.backgroundColor = kAccent;
-                if (GUILayout.Button(_v1Busy ? "⏳" : "▶ 텍스처 생성 (웹 UI 권장)", GUILayout.Height(26)))
-                    Application.OpenURL(LccServerManager.BaseUrl + "/");
-                GUI.backgroundColor = prev; GUI.enabled = true;
+
+                using (new EditorGUI.DisabledScope(_bakePhotoReal))
+                {
+                    _bakeSource = (BakeColorSource)EditorGUILayout.EnumPopup("color source", _bakeSource);
+                    if (_bakeSource == BakeColorSource.SplatDataBin)
+                    {
+                        _bakeLod = EditorGUILayout.IntSlider("source LOD", _bakeLod, 0, 4);
+                    }
+                    else
+                    {
+                        using (new EditorGUILayout.HorizontalScope())
+                        {
+                            _bakeExternalPly = EditorGUILayout.TextField("external PLY", _bakeExternalPly);
+                            if (GUILayout.Button("…", GUILayout.Width(28)))
+                            {
+                                string picked = EditorUtility.OpenFilePanel("Colored point cloud PLY", "", "ply");
+                                if (!string.IsNullOrEmpty(picked)) _bakeExternalPly = picked.Replace('\\', '/');
+                            }
+                        }
+                    }
+                    _bakeCellSize = EditorGUILayout.Slider("voxel cell (m)", _bakeCellSize, 0.1f, 3f);
+                    _bakeK        = EditorGUILayout.IntSlider("k neighbors",    _bakeK, 1, 16);
+                    _bakeFalloff  = EditorGUILayout.Slider("distance falloff",  _bakeFalloff, 1f, 4f);
+                    _bakeUseOpacity = EditorGUILayout.ToggleLeft("weight by splat opacity", _bakeUseOpacity);
+                }
+
+                EditorGUILayout.Space(4);
+                bool ready = !string.IsNullOrEmpty(_bakeMeshAsset) && File.Exists(_bakeMeshAsset);
+                using (new EditorGUI.DisabledScope(!ready))
+                {
+                    var prev = GUI.backgroundColor; GUI.backgroundColor = kAccent;
+                    if (GUILayout.Button("▶ 컬러 베이크 실행", GUILayout.Height(30)))
+                        _RunBakeColors(scene);
+                    GUI.backgroundColor = prev;
+                }
+
+                if (!string.IsNullOrEmpty(_bakeLastSaved))
+                    EditorGUILayout.HelpBox("✓ 저장됨: " + _bakeLastSaved, MessageType.None);
             }
-            _V1LogBox();
+        }
+
+        void _RunBakeColors(LccScene scene)
+        {
+            try
+            {
+                var srcMesh = AssetDatabase.LoadAssetAtPath<Mesh>(_bakeMeshAsset);
+                if (srcMesh == null)
+                    throw new System.IO.FileNotFoundException($"Mesh 에셋 로드 실패: {_bakeMeshAsset}");
+
+                // 원본 유지 — 별도 Mesh 인스턴스 복제 후 컬러라이즈
+                var vizMesh = new Mesh { name = srcMesh.name + "_Colored", indexFormat = srcMesh.indexFormat };
+                vizMesh.SetVertices(srcMesh.vertices);
+                vizMesh.SetTriangles(srcMesh.triangles, 0, calculateBounds: true);
+
+                var opts = _bakePhotoReal ? LccMeshColorizer.Options.PhotoReal : LccMeshColorizer.Options.Default;
+                if (!_bakePhotoReal)
+                {
+                    opts.cellSize        = _bakeCellSize;
+                    opts.k               = _bakeK;
+                    opts.maxRadius       = _bakeCellSize * 3f;
+                    opts.useSourceOpacity = _bakeUseOpacity;
+                    opts.distanceFalloff = _bakeFalloff;
+                }
+
+                double t0 = EditorApplication.timeSinceStartup;
+                string summary;
+                if (_bakeSource == BakeColorSource.ExternalPly)
+                {
+                    if (string.IsNullOrEmpty(_bakeExternalPly) || !File.Exists(_bakeExternalPly))
+                        throw new System.IO.FileNotFoundException($"external PLY 없음: {_bakeExternalPly}");
+                    var cloud = LccColoredPointCloudPlyLoader.Load(_bakeExternalPly);
+                    double t1 = EditorApplication.timeSinceStartup;
+                    LccMeshColorizer.Colorize(vizMesh, cloud.positions, cloud.colors, opts);
+                    double t2 = EditorApplication.timeSinceStartup;
+                    summary = $"PLY({Path.GetFileName(_bakeExternalPly)}) · {cloud.positions.Length:N0} pts · load {(t1 - t0) * 1000:F0} ms · colorize {(t2 - t1) * 1000:F0} ms";
+                }
+                else
+                {
+                    var splats = LccSplatDecoder.DecodeLod(scene, _bakeLod);
+                    double t1 = EditorApplication.timeSinceStartup;
+                    LccMeshColorizer.Colorize(vizMesh, splats, opts);
+                    double t2 = EditorApplication.timeSinceStartup;
+                    summary = $"data.bin LOD {_bakeLod} · {splats.Length:N0} splats · decode {(t1 - t0) * 1000:F0} ms · colorize {(t2 - t1) * 1000:F0} ms";
+                }
+
+                // 저장: 메쉬 + 매터리얼 한 에셋에 묶기
+                string dstMesh = _bakeMeshAsset.Replace(".asset", "_Colored.asset");
+                AssetDatabase.CreateAsset(vizMesh, dstMesh);
+
+                var shader = Shader.Find("Virnect/LccVertexColorUnlit");
+                if (shader == null) shader = Shader.Find("Universal Render Pipeline/Unlit");
+                var mat = new Material(shader) { name = srcMesh.name + "_ColoredMat" };
+                string dstMat = dstMesh.Replace(".asset", "_Mat.mat");
+                AssetDatabase.CreateAsset(mat, dstMat);
+                AssetDatabase.SaveAssets();
+                AssetDatabase.Refresh();
+
+                _bakeLastSaved = dstMesh;
+                Debug.Log($"[LccImporter] Bake 완료 · {vizMesh.vertexCount:N0} verts · {summary}\n  → {dstMesh}\n  → {dstMat}");
+                Selection.activeObject = vizMesh;
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"[LccImporter] Bake 실패: {ex.Message}\n{ex.StackTrace}");
+            }
         }
 
         // ──────── 📷 PHOTO TEX (v1 page 5) ──────────────────────────────
