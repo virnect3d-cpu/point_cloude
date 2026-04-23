@@ -1,0 +1,36 @@
+# Unity ──
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+*.csproj
+*.sln
+*.userprefs
+*.pidb
+*.booproj
+
+# Meta files are tracked for Unity packages (do NOT ignore .meta)
+
+# 큰 샘플 데이터는 Git 에 담지 않음 (→ 별도 스토리지)
+LCC/**/data.bin
+LCC/**/environment.bin
+LCC/**/collision.lci
+LCC/**/*.ply
+
+# Python ──
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
