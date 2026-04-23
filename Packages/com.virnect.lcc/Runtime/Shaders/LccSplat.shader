@@ -52,7 +52,8 @@ Shader "Virnect/LccSplat"
             Varyings vert(Attributes v)
             {
                 Varyings o;
-                float4 viewPos = mul(UNITY_MATRIX_V, float4(v.positionOS.xyz, 1.0));
+                float4 worldPos = mul(unity_ObjectToWorld, float4(v.positionOS.xyz, 1.0));
+                float4 viewPos  = mul(UNITY_MATRIX_V, worldPos);
                 float radius = max(v.scaleOp.x * _ScaleMul, 0.003);
                 viewPos.xy += v.corner * radius;
                 o.positionHCS = mul(UNITY_MATRIX_P, viewPos);
@@ -102,7 +103,8 @@ Shader "Virnect/LccSplat"
             Varyings vert(Attributes v)
             {
                 Varyings o;
-                float4 viewPos = mul(UNITY_MATRIX_V, float4(v.positionOS.xyz, 1.0));
+                float4 worldPos = mul(unity_ObjectToWorld, float4(v.positionOS.xyz, 1.0));
+                float4 viewPos  = mul(UNITY_MATRIX_V, worldPos);
                 float radius = max(v.scaleOp.x * _ScaleMul, 0.003);
                 viewPos.xy += v.corner * radius;
                 o.positionHCS = mul(UNITY_MATRIX_P, viewPos);
