@@ -1,0 +1,207 @@
+---
+description: Senior-level agentic system design based on Anthropic's "Building Effective Agents" — the Augmented LLM, the five core patterns (Prompt Chaining, Routing, Parallelization, Orchestrator-Workers, Evaluator-Optimizer), when to use a workflow vs. a true agent, tool-use design, human-in-the-loop gates, and the "start simple, add complexity only when evals demand it" philosophy. Use when the user is building an AI agent, multi-step LLM pipeline, or autonomous system; deciding between frameworks like LangGraph/CrewAI vs. raw API; designing tool APIs for an LLM; or debugging an agent that loops, fails silently, or over-engineers.
+globs:
+alwaysApply: false
+---
+
+# Agentic System Design Skill
+
+The core Anthropic doctrine: **most teams build agents when they should have built a workflow, and workflows when they should have built a single prompt.** Complexity buys you flexibility and costs you latency, cost, and debuggability. Start with the simplest thing that clears your eval bar, and only climb the ladder when it doesn't.
+
+## The vocabulary (use these terms precisely)
+
+- **Augmented LLM**: one LLM call enhanced with tools, retrieval, or memory. This is the atom of every agentic system.
+- **Workflow**: LLMs orchestrated through **predefined code paths**. Deterministic control flow written by a human.
+- **Agent**: LLM **dynamically directs its own process**, chooses tools, decides when it's done.
+
+You can (and often should) have workflows that *contain* agent-shaped subsystems, and agents that call workflows. The distinction matters because debugging an agent that crashes is harder than debugging a workflow whose code path you can read.
+
+## The decision ladder
+
+Climb only as high as your task requires.
+
+```
+0. Single prompt              ← most tasks
+1. Prompt + retrieval          ← needs fresh/private data
+2. Prompt + tools (Augmented LLM)
+3. Workflow: predefined chain / routing / parallel
+4. Workflow: orchestrator-workers
+5. Workflow: evaluator-optimizer loop
+6. True agent (model-driven control flow)
+```
+
+If a simpler rung clears your evals, stop there. Every additional rung adds failure modes.
+
+## The five canonical workflow patterns
+
+### 1. Prompt Chaining — steps in a fixed order
+
+```
+[input] → LLM1 → [intermediate] → LLM2 → [intermediate] → LLM3 → [output]
+                         ↓ (optional gate)
+                    code check / validate
+```
+
+Use when: the task decomposes into a known sequence (e.g., *draft → translate → polish*). Between steps you can insert code validators ("gate checks") — if the intermediate fails, retry or short-circuit.
+
+### 2. Routing — model chooses which branch
+
+```
+        ┌─ path A (e.g., billing)
+LLM ──┤── path B (e.g., technical support)
+        └─ path C (e.g., sales)
+```
+
+Use when: inputs fall into distinct classes that want different downstream prompts/models. **This is also where model-cascading lives** (cheap model classifies, expensive model handles only the hard class).
+
+### 3. Parallelization — run sections or vote
+
+**Sectioning** — split work that's independent:
+```
+           ┌→ LLM (section 1) ┐
+input ────┼→ LLM (section 2) ┼→ aggregator → output
+           └→ LLM (section 3) ┘
+```
+
+**Voting** — run the same task N times, aggregate:
+```
+           ┌→ LLM run 1 ┐
+input ────┼→ LLM run 2 ┼→ majority / merge → output
+           └→ LLM run 3 ┘
+```
+
+Use sectioning when subtasks don't need each other (latency win). Use voting when you need higher confidence or diverse perspectives (quality win). Both are easy to implement; both multiply cost.
+
+### 4. Orchestrator-Workers — dynamic decomposition
+
+```
+            [orchestrator LLM]
+          decides subtasks at runtime
+         ┌──────┼──────┐
+       worker1 worker2 worker3
+         └──────┼──────┘
+           [synthesizer]
+```
+
+Use when: you **can't predict the subtasks** in advance. The canonical example is "make this change across a multi-file codebase" — the orchestrator looks at the code, decides which files need edits, spawns workers per file. This is the pattern Claude Code itself uses when launching subagents.
+
+Key difference from parallelization: subtasks are **determined at runtime**, not predefined.
+
+### 5. Evaluator-Optimizer — tight feedback loop
+
+```
+   ┌──────────────┐
+   │              ↓
+ [optimizer LLM]  [evaluator LLM]
+   ↑              │
+   └──────── fails evaluation
+```
+
+Use when: you have clear evaluation criteria **and** iterative refinement visibly improves quality. Classic uses: translation polish, code that needs to pass tests, writing with a style rubric. The evaluator must have crisper judgment than the optimizer, or the loop degrades.
+
+## When to reach for a true agent (not a workflow)
+
+Agents trade predictability for flexibility. They're right when:
+
+- The solution path can't be specified up front (long-horizon research, open-ended code migration).
+- You have **clear success criteria** the agent can self-check against (tests pass, answer verified).
+- You have a **feedback loop** (tool returns tell it what happened, errors are legible).
+- You have **human oversight** — a stop button, cost ceiling, and audit trail.
+
+If you're missing clear success criteria or feedback, a workflow is safer.
+
+## Tool use — the design surface that decides agent quality
+
+An agent's ceiling is its tool schema. The #1 cause of bad agents is bad tools.
+
+**Tool design rules:**
+
+1. **One clear purpose per tool.** `run_sql` and `send_email`, not `do_stuff`.
+2. **Short, semantic names.** The name alone should tell the model when to call it.
+3. **Descriptive `description` field.** This is a mini-prompt — describe *when to use* and *when not to*. ~100 tokens is fine.
+4. **JSON Schema for inputs.** Include `description` on every property. Required/optional explicit. Enums for small closed sets.
+5. **Return structured, summarizable content.** If a tool returns 50 KB of JSON, wrap or paginate. A model rereads tool output every turn — large returns = context bleed.
+6. **Errors as normal returns, not exceptions.** `{status: "error", reason: "..."}` keeps the loop running and gives the model something to react to.
+7. **Idempotent when possible.** Agents retry. Non-idempotent destructive tools should require human confirmation.
+8. **Expose a "think" pseudo-tool for complex agents** — a tool that accepts notes and returns nothing, so the model can externalize reasoning without side effects.
+
+## Human-in-the-loop gates
+
+For anything destructive (writes, sends, spends, deletes): require explicit user confirmation at the **protocol level**, not the prompt level. Prompt-level "please confirm first" instructions **will be skipped** under pressure. Use tool-level gating:
+
+```python
+def send_email(to, body):
+    if not user_has_approved_send(tool_call_id):
+        return {"status": "awaiting_approval"}
+    ...
+```
+
+Claude Code's permissions system (`permissions.allow/deny/ask` in settings.json) is this pattern made reusable.
+
+## Loop control (the bug you will actually hit)
+
+Agents loop. Without stop conditions:
+
+- **Max iterations** — hard cap (10–20 for most tasks).
+- **Budget cap** — dollar limit per run.
+- **No-progress detector** — if the same tool is called with near-identical args N times, break and escalate.
+- **Self-declared done** — tool called `submit_final_answer`; until it's called, keep going. Cleaner than parsing the model's prose.
+
+## Framework vs. raw API
+
+Anthropic's public guidance: **start with the raw API**. Frameworks (LangChain, LangGraph, CrewAI, AutoGen, LlamaIndex agents) hide prompts and tool schemas, which is exactly what you need to see when things break. Many of the patterns above are 20–50 lines of straight Python.
+
+Use a framework when: you need multi-model portability, you have a team that already knows it, or you're building on ready-made integrations that would cost a week to reimplement. Otherwise, direct SDK calls with explicit state in a simple loop will debug faster.
+
+If you use a framework, **read its generated prompts** — misaligned assumptions about what's under the hood is the #1 support issue Anthropic's teams see.
+
+## Observability — non-negotiable
+
+Before launch:
+
+- Log every LLM call: input, output, model, latency, token counts, tool calls.
+- Trace the full agent run as a tree (OpenTelemetry or similar).
+- Save a sample of transcripts for weekly human review.
+- Dashboard: success rate, cost per run, p50/p95 latency, tool-call counts.
+
+You cannot debug or improve an agent you can't see.
+
+## Cost and latency reality check
+
+| Layer | Typical cost vs. baseline | Latency vs. baseline |
+|---|---|---|
+| Single prompt | 1× | 1× |
+| Prompt + retrieval | 1.1× | 1.3× |
+| Tool-augmented LLM | 1.5–3× | 2–4× |
+| Workflow (chain/route) | 2–5× | 2–5× |
+| Orchestrator-workers | 3–10× | 1–3× (parallel) |
+| Evaluator-optimizer | 3–10× | 3–10× |
+| True agent | 5–50× (high variance) | 5–30× |
+
+Budget accordingly. A "slightly better answer" is rarely worth 20× cost and 10× latency — and your users will notice.
+
+## Anti-patterns
+
+- **Agent when a workflow would do.** "We used an agent framework" is not a product feature.
+- **Unbounded tool use.** No max-steps → runaway costs.
+- **One god-tool that takes natural language.** Prevents the model from composing; debugging is a nightmare.
+- **Prompting "don't hallucinate."** Does nothing. Structure tools and inputs so hallucination is impossible instead.
+- **No human gate on destructive actions.** Will eventually delete production.
+- **No evals before launch.** You're shipping vibes.
+- **Framework as a hiding place.** If you can't read every prompt your agent sends, you can't run it.
+
+## When giving advice
+
+1. Ask **what the success criterion is, in code**. If they can't state it, evals come first.
+2. Ask **what they've tried at each rung below** agent. Usually a simpler rung is unexplored.
+3. Ask about **cost ceiling and loop termination**. If these aren't decided, flag it.
+4. Ask **which tools the agent has, with schemas**. If the tool schema is weak, that's the bug.
+5. Suggest **logging and transcript review** before any "prompt tuning."
+
+## Sources
+
+- [Anthropic — Building Effective Agents](https://www.anthropic.com/research/building-effective-agents) (the foundational essay)
+- [Anthropic — Building Effective AI Agents: Architecture Patterns PDF](https://resources.anthropic.com/hubfs/Building%20Effective%20AI%20Agents-%20Architecture%20Patterns%20and%20Implementation%20Frameworks.pdf)
+- [Cloudflare Agents — Anthropic patterns reference implementations](https://github.com/cloudflare/agents/blob/main/guides/anthropic-patterns/README.md)
+- [Spring AI — Effective Agents (Java implementations)](https://docs.spring.io/spring-ai/reference/api/effective-agents.html)
+- [Vercel AI SDK — Workflow patterns](https://ai-sdk.dev/docs/agents/workflows)

@@ -1,0 +1,213 @@
+---
+description: Power-user reference for Claude Code — the five extension points (skills, subagents, slash commands, hooks, MCP servers), the unified skills/commands format, when to use each, settings.json/CLAUDE.md/permissions model, statusline and output styles, plugins for distribution, the -p headless mode for batch scripting, and context-engineering patterns (subagent delegation to keep main context clean). Use when the user wants to extend Claude Code, is deciding between a slash command / skill / subagent / hook, needs to write a hook, wants to reduce token usage, or is building a team-wide Claude Code setup.
+globs:
+alwaysApply: false
+---
+
+# Claude Code Mastery Skill
+
+Claude Code is not "a coding chatbot." It's a general-purpose agent framework with five composable extension points. Most users use one or two. A senior user uses all five deliberately.
+
+## The five extension points — one-line mental model
+
+| Feature | What it is | When Claude uses it |
+|---|---|---|
+| **Skills** | Directory of markdown + optional scripts/files, with frontmatter. Unified with slash commands. | Auto-invoked when `description` matches task, or manually via `/name`. |
+| **Subagents** | Separate agent instance with its own context window. | For heavy/independent work you want out of main context. |
+| **Slash commands** | Single-file entries you type `/foo` to trigger. | Predictable, user-triggered workflows. |
+| **Hooks** | Shell commands fired on events (pre-tool, post-tool, session-end, etc.). | Guardrails, logging, auto-formatting. Not invoked by Claude directly. |
+| **MCP servers** | External processes exposing tools/resources/prompts over a standard protocol. | When Claude needs to interact with an external system (Slack, Figma, Blender, databases). |
+| **Plugins** | Bundles of the above, distributable. | Sharing a team setup. |
+
+## Skills (the unified format, as of 2026)
+
+Slash commands and skills are **merged**. A file at `.claude/commands/deploy.md` and a skill at `.claude/skills/deploy/SKILL.md` both create `/deploy`. Go with the skill format — it gets directory-scoped supporting files and richer frontmatter.
+
+### Anatomy
+
+```
+.claude/skills/deploy/
+├── SKILL.md              ← required, markdown with YAML frontmatter
+├── templates/            ← optional assets
+│   └── deploy.yml
+└── scripts/
+    └── rollback.sh
+```
+
+### Frontmatter fields
+
+```yaml
+name: deploy                          # slash-command name
+description: Deploy current branch... # auto-invoke signal; fill this thoughtfully
+disable-model-invocation: false       # true = manual only (hide from auto-pick)
+allowed-tools: [Bash, Read, Edit]     # optional restriction
+context: fork                         # "fork" = run in subagent (isolated context)
+```
+
+**All fields optional except description** (which lets Claude auto-pick).
+
+### Skill scopes (where to put them)
+
+- `~/.claude/skills/` — **user-level**, available in every session on your machine.
+- `<project>/.claude/skills/` — **project-level**, checked into git, shared with team.
+- Claude Code bundles some skills (`/simplify`, `/debug`, `/loop`, `/claude-api`, `/review`, `/security-review`). These appear automatically.
+
+### When to write a skill vs. a slash command vs. prose in CLAUDE.md
+
+- **CLAUDE.md** — always-on, short (< 100 lines) conventions ("we use pnpm, not npm; run `pnpm test` before commits"). Loaded every turn; don't bloat it.
+- **Slash command / skill** — a **named workflow** you or Claude trigger. Can have templates, scripts, multiple files. Loaded only when invoked.
+- **Subagent** — a workflow that needs **its own context window** to avoid polluting the main one.
+
+## Subagents — your #1 context-management lever
+
+### The math
+
+A complex task needs X tokens of setup context, accumulates Y tokens of working state, and produces a Z-token answer. Running N such tasks from the main agent: `(X + Y + Z) × N` tokens in your main context.
+
+Delegating to N subagents: only `Z × N` comes back. The `(X + Y) × N` stays in subagent contexts that get discarded.
+
+### When subagents help
+
+- Independent parallel work (explore 3 directories at once).
+- Deep-dive research where most of the work is throwaway.
+- Running tests / builds whose full output would drown the main thread.
+- Anything you'd describe as "just go figure this out and tell me the answer."
+
+### When subagents hurt
+
+- Tasks that need the main agent's full awareness of the codebase change (a PythonTests subagent that never shares its reasoning leaves the main agent unable to think holistically).
+- Tightly coupled work where shared state is the whole point.
+
+**Rule:** independent tasks only. If two subagents would need to talk to each other mid-flight, collapse them into one.
+
+### Built-in Explore agent + plan mode
+
+`Explore` in plan mode is the single highest-leverage use of subagents: Claude drafts a plan by farming out codebase-exploration to throwaway subagents, keeping main context on the plan itself.
+
+## Hooks — fire-and-forget guardrails
+
+Hooks are shell commands tied to events: `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, etc. They run outside the model. Stdout/stderr lands as a system-reminder in Claude's next turn — a **soft guardrail**, not a hard block (the model can still be persuaded to retry), but enough to catch most foot-guns.
+
+Hook commands receive JSON on stdin: `{tool_name, tool_input, cwd, session_id, ...}`. Useful patterns:
+
+- **Format-on-write:** `PostToolUse` on `Write|Edit` runs `prettier --write` and reports success.
+- **Secret scan:** `PreToolUse` on `Write` greps for `sk-`, `api_key`, etc., blocks the write if found.
+- **Notify-on-done:** `Stop` hook pings you on Slack when Claude stops responding.
+- **Branch guard:** `PreToolUse` on `Bash` refuses `git push origin main` unless explicitly authorized.
+
+Configure interactively with `/hooks` or via `settings.json`:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          { "type": "command", "command": "prettier --write \"$CLAUDE_FILE_PATHS\"" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+## Settings.json — three scopes
+
+| File | Scope | Use |
+|---|---|---|
+| `~/.claude/settings.json` | user (global) | model default, env vars, personal hooks |
+| `<project>/.claude/settings.json` | project (checked in) | team conventions, required permissions |
+| `<project>/.claude/settings.local.json` | project (git-ignored) | your local overrides on that project |
+
+Keys worth knowing:
+
+- `model` — default model for new sessions.
+- `env` — env vars injected into every tool-run shell.
+- `includeCoAuthoredBy` — toggle commit byline.
+- `cleanupPeriodDays` — auto-clean old sessions.
+- `permissions.allow/deny/ask` — tool-level gates (`"Bash(git push:*)": "deny"`).
+- `statusLine` — custom status line (see below).
+- `hooks` — event hooks.
+
+## Status line and output styles
+
+**statusLine**: a shell command whose stdout appears at the bottom of the UI. Useful for showing current branch, model, token budget, cost.
+
+```json
+"statusLine": {
+  "type": "command",
+  "command": "printf '[%s] %s' \"$(git branch --show-current 2>/dev/null)\" \"$CLAUDE_MODEL\""
+}
+```
+
+**Output styles**: control verbosity/format (via slash command `/output-style` or SDK). Use "concise" to cut token usage on routine chatter.
+
+## MCP servers — when tools aren't enough
+
+If Claude needs to do something native tools don't cover, write or install an MCP server. Details in the `mcp-server-development` skill. Short version for Claude Code use:
+
+- Add to `.mcp.json` in project root (shared) or configure via `/mcp`.
+- Servers can be `stdio` (local process) or `http` (remote).
+- Each server contributes tools/resources/prompts to Claude's toolbox.
+
+## Plugins — bundle and share
+
+A plugin is a directory that packages skills + subagents + commands + hooks together. Install via `/plugin install`. Use plugins to:
+
+- Ship a team's shared setup.
+- Distribute domain packs (e.g., a "Rails team" plugin with opinionated commands).
+- Version your Claude Code config alongside a repo.
+
+## Headless mode — the under-used productivity multiplier
+
+```bash
+claude -p "Refactor all fetch() calls to use the new http client" path/
+claude -p "$(cat prompt.txt)" --output-format stream-json > log.jsonl
+```
+
+`-p` runs a single prompt headlessly. Compose with standard Unix:
+
+```bash
+# Parallel refactor across 20 services
+ls services/ | xargs -P 4 -I{} claude -p "upgrade to v2 client" services/{}
+```
+
+More scalable than spinning up subagents for batch work, and easier to inspect (every run is a separate log).
+
+## Context-engineering playbook (what a veteran does)
+
+1. **CLAUDE.md**: ≤ 80 lines of conventions that apply every turn. Refuse to dump docs here.
+2. **Skills**: every repeatable workflow is a skill with a crisp `description`. Claude auto-picks; you don't have to remember slash names.
+3. **Subagents**: every "go figure out X" task gets delegated with `context: fork`.
+4. **Hooks**: format-on-write, secret scan, branch protection.
+5. **Headless `-p`**: batch fixes / migrations run outside the interactive session.
+6. **settings.json**: cheap model as default (Haiku), `MAX_THINKING_TOKENS` capped, telemetry off — see the `claude-api` skill and your own `~/.claude/settings.json`.
+7. **Plan mode**: for anything that touches > 3 files, enter plan mode first. Approve a plan, then execute — cheaper and safer than improvising.
+
+## Common mistakes
+
+- **Treating skills like README files.** Skills run in Claude's context. Keep them dense, action-oriented, and scoped.
+- **Writing a subagent that shares state with the main agent.** If you need shared state, it's not a subagent job.
+- **Hooks that silently fail.** Always write to stderr on failure so it surfaces in the next system-reminder.
+- **One giant CLAUDE.md.** Split conventions into scoped skills. CLAUDE.md is for always-on, not reference docs.
+- **No `.mcp.json` in the repo.** If your team needs an MCP server, check the config in.
+- **Running Opus by default.** Override to Haiku in settings, escalate per-session with `/model`.
+
+## When giving advice
+
+- Ask which **extension point** fits. The choice is usually obvious once you ask "who triggers this, Claude or the user?" and "does it need its own context?"
+- Ask about **scope**. User-level vs. project-level is a team-collaboration question, not a preference.
+- Push users toward **headless `-p`** for any task they're about to do 5+ times manually.
+- Push users toward **subagents + plan mode** when main context feels crowded.
+- Always recommend **`/cost` awareness** and model-cascading (Haiku default → Sonnet for hard).
+
+## Sources
+
+- [Claude Code — Skills docs](https://code.claude.com/docs/en/skills)
+- [Claude Agent SDK — Slash commands](https://platform.claude.com/docs/en/agent-sdk/slash-commands)
+- [alexop.dev — Understanding Claude Code's Full Stack (MCP, Skills, Subagents, Hooks)](https://alexop.dev/posts/understanding-claude-code-full-stack/)
+- [alexop.dev — Claude Code Customization guide](https://alexop.dev/posts/claude-code-customization-guide-claudemd-skills-subagents/)
+- [blog.sshh.io — How I Use Every Claude Code Feature](https://blog.sshh.io/p/how-i-use-every-claude-code-feature)
+- [samuellawrentz.com — Claude Code Hooks and Subagents](https://samuellawrentz.com/blog/claude-code-hooks-subagents/)
+- [awesome-claude-code (GitHub)](https://github.com/hesreallyhim/awesome-claude-code)

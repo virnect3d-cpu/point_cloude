@@ -1,0 +1,171 @@
+---
+description: Reference for Unity Editor keyboard shortcuts — Tools, Transform, Scene View navigation, GameObject operations, Animation, Play Mode, Windows, and the Shortcuts Manager. Use when the user asks "how to ... in Unity", mentions a Unity hotkey, needs editor-productivity tips, or is troubleshooting a shortcut. Covers Unity 2020 LTS through Unity 6.
+globs:
+alwaysApply: false
+---
+
+# Unity Editor Shortcuts Skill
+
+When the user asks Unity editor shortcut / hotkey / "how to X faster in Unity" questions, use this reference.
+
+## Rules of the road (read first)
+
+- Shortcuts are **context-sensitive**: most only fire when the matching window is focused (Scene, Hierarchy, Project, Game, etc.). Ask or confirm which window is active.
+- Unity has a built-in **Shortcuts Manager**: `Edit > Shortcuts...` on Win/Linux, `Unity > Shortcuts...` on macOS. Teach users to check and rebind here — it also shows every command, even those not listed below.
+- The shortcuts below are the **defaults**; if the user's key "does nothing", tell them to check the Shortcuts Manager — their profile may be custom or a package may have claimed the key.
+- **macOS mapping**: `Ctrl` → `Cmd`, `Alt` → `Option`. Examples below use Windows naming.
+
+## Transform tools (toolbar)
+
+| Shortcut | Action |
+|---|---|
+| `Q` | Hand / Pan tool (view) |
+| `W` | Move |
+| `E` | Rotate |
+| `R` | Scale |
+| `T` | Rect transform (2D/UI) |
+| `Y` | Transform (unified move/rotate/scale) |
+| `Z` | Pivot / Center mode toggle |
+| `X` | Global / Local rotation mode toggle |
+| `V` | Vertex snap (hold while using Move) |
+| `Ctrl` (hold while moving) | Grid snap |
+
+## Scene View navigation
+
+| Shortcut | Action |
+|---|---|
+| `F` | Frame selected |
+| `F F` (double) | Frame selected and follow |
+| `Shift F` | Lock view to selected |
+| `Alt LMB drag` | Orbit around pivot |
+| `Alt MMB drag` / `MMB drag` | Pan |
+| `Alt RMB drag` / `Scroll` | Zoom |
+| `RMB drag` | Look around (FPS mode) |
+| `RMB + WASD` | Fly through scene (hold `Shift` for speed boost) |
+| `Alt Scroll` | Zoom to cursor |
+| Arrow keys (with RMB held) | Move slowly in fly mode |
+
+## GameObject operations
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl Shift N` | Create empty GameObject |
+| `Alt Shift N` | Create empty child of selected |
+| `Ctrl Shift A` | Add Component |
+| `Ctrl D` | Duplicate |
+| `Delete` / `Shift Del` | Delete selected |
+| `Ctrl Alt F` | Move GameObject to current Scene view |
+| `Ctrl Shift F` | Align GameObject with Scene view camera |
+| `Shift F` | Lock Scene view to selected |
+| `F2` | Rename in Hierarchy |
+
+## File / Scene
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl S` | Save Scene |
+| `Ctrl Shift S` | Save Scene As |
+| `Ctrl N` | New Scene |
+| `Ctrl O` | Open Scene |
+| `Ctrl B` | Build And Run |
+| `Ctrl Shift B` | Build Settings |
+
+## Play Mode
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl P` | Play / Stop toggle |
+| `Ctrl Shift P` | Pause |
+| `Ctrl Alt P` | Step (one frame) |
+
+## Windows (focus / open)
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl 1` | Scene |
+| `Ctrl 2` | Game |
+| `Ctrl 3` | Inspector |
+| `Ctrl 4` | Hierarchy |
+| `Ctrl 5` | Project |
+| `Ctrl 6` | Animation |
+| `Ctrl 7` | Profiler |
+| `Ctrl 8` | Audio Mixer |
+| `Ctrl 9` | Asset Store (older versions) |
+| `Ctrl 0` | Asset Store |
+| `Ctrl Shift C` | Console |
+| `Ctrl Tab` / `Ctrl Shift Tab` | Next / previous window |
+
+## Editing / general
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl Z` | Undo |
+| `Ctrl Y` / `Ctrl Shift Z` | Redo |
+| `Ctrl X` / `Ctrl C` / `Ctrl V` | Cut / Copy / Paste |
+| `Ctrl A` | Select all |
+| `Ctrl D` | Duplicate |
+| `Ctrl F` | Find in window (Project/Hierarchy) |
+| `Esc` | Clear search / close popup |
+
+## Animation window
+
+| Shortcut | Action |
+|---|---|
+| `Space` | Play animation preview |
+| `K` | Record keyframe on all animated properties |
+| `C` | Add keyframe at current time |
+| `.` (period) | Next frame |
+| `,` (comma) | Previous frame |
+| `Alt .` | Next keyframe |
+| `Alt ,` | Previous keyframe |
+| `Shift ,` / `Shift .` | First / last keyframe |
+
+## Timeline
+
+| Shortcut | Action |
+|---|---|
+| `Space` | Play |
+| `F` | Frame selection |
+| `A` | Frame all |
+| `T` | Split clip at playhead |
+| `M` | Add marker at playhead |
+| `Delete` | Delete selected clip |
+| `Shift Click` | Range select |
+
+## ProBuilder / packaged tool shortcuts
+
+ProBuilder and Cinemachine add their own shortcuts (visible in Shortcuts Manager under `ProBuilder`, `Cinemachine`). If a key seems mysteriously claimed, the installed package is likely the reason.
+
+## Customizing shortcuts
+
+Tell the user:
+1. `Edit > Shortcuts...` (Windows/Linux) or `Unity > Shortcuts...` (macOS).
+2. Search by command name or click a key on the virtual keyboard to see what's bound.
+3. Right-click an entry to `Change Binding` or `Reset to Default`.
+4. **Profiles**: you can save a profile ("MyKeys") and share it across machines via `~/Library/Preferences/Unity/...` (Mac) or `%APPDATA%/Unity/Editor/...` (Windows). Useful for teams.
+
+## Productivity recipes
+
+- **Isolate a GameObject**: select → `Shift F` to lock view. Un-lock with `Shift F` again.
+- **Align camera with Scene view**: select Camera → `Ctrl Shift F`. Instant "what I see is what camera renders".
+- **Drop object on surface**: select object → hold `V` (vertex snap) → hover over target vertex → click.
+- **Fast scene navigation**: hold `RMB` then use WASD + Shift for fly-through (industry-standard FPS navigation).
+- **Find a missing Inspector field**: `Ctrl F` inside the Inspector searches component names since Unity 2022.2+.
+- **See every shortcut for the current context**: open Shortcuts Manager and filter by window name.
+
+## Platform differences
+
+| Windows/Linux | macOS |
+|---|---|
+| `Ctrl` | `Cmd` |
+| `Alt` | `Option` |
+| `F2` (rename) | `Return` in Hierarchy on macOS |
+| `Delete` | `Cmd Delete` |
+
+## Sources
+
+- [Unity Manual — Shortcuts Manager](https://docs.unity3d.com/Manual/ShortcutsManager.html)
+- [Cheatography — Unity 3D Engine shortcuts (Narren)](https://cheatography.com/narren/cheat-sheets/unity-3d-engine/)
+- [Evercast — 32 must-know Unity hotkeys](https://www.evercast.us/blog/unity-hotkeys-shortcuts)
+- [Zero To Mastery — Unity Cheat Sheet](https://zerotomastery.io/cheatsheets/unity-cheat-sheet/)
+- [QuickRef.me — Unity 3D Quick Reference](https://quickref.me/unity-3d)

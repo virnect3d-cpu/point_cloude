@@ -1,0 +1,213 @@
+---
+description: Reference for Blender keyboard shortcuts and hotkeys across Object Mode, Edit Mode, Sculpt, UV, Animation, and viewport navigation. Use when the user asks "how do I ... in Blender", mentions a Blender hotkey/shortcut, needs help with modeling/sculpting/animation workflows, or wants a cheat sheet. Covers Blender 2.8x – 4.x.
+globs:
+alwaysApply: false
+---
+
+# Blender Shortcuts Skill
+
+When the user asks any Blender shortcut / hotkey / "how to do X in Blender" question, use this reference.
+
+## Rules of the road (read first)
+
+- Blender is **hover-sensitive**: the shortcut applies to whichever editor the mouse is hovering over. Tell the user to hover their cursor over the 3D viewport before pressing keys.
+- Since Blender 2.8, **left-click select** is the default (was right-click in 2.7x). Mention this if the user mentions old tutorials.
+- Modal operators use **axis constraints**: press `X`, `Y`, or `Z` after `G`/`R`/`S` to constrain to an axis; press twice for the local axis. Hold `Shift+X` etc. to exclude an axis.
+- Type a number while in a modal op to enter an exact value, then Enter.
+- `Ctrl` while dragging = snap to grid/increments; `Shift` = fine control.
+
+## Global / File
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl S` | Save |
+| `Ctrl Shift S` | Save As |
+| `Ctrl O` | Open |
+| `Ctrl N` | New file |
+| `Ctrl Z` / `Ctrl Shift Z` | Undo / Redo |
+| `F3` | Operator search (find any command by name — most important shortcut to teach beginners) |
+| `F12` | Render image |
+| `Ctrl F12` | Render animation |
+| `F11` | Toggle render window |
+| `Ctrl Space` | Maximize area under cursor |
+| `Ctrl Alt Space` | Fullscreen area (hides headers) |
+| `Ctrl Q` | Quit |
+
+## Viewport navigation
+
+| Shortcut | Action |
+|---|---|
+| `MMB` drag | Orbit |
+| `Shift MMB` drag | Pan |
+| `Ctrl MMB` drag / `Scroll` | Zoom |
+| `Numpad .` | Frame selected |
+| `Home` | Frame all |
+| `Numpad 1 / 3 / 7` | Front / Right / Top ortho |
+| `Ctrl Numpad 1/3/7` | Back / Left / Bottom |
+| `Numpad 5` | Toggle ortho/perspective |
+| `Numpad 0` | Camera view |
+| `Numpad /` | Local view (isolate selection) |
+| `` ` `` (backtick) | Pie menu for views |
+| `Shift `` ` `` | Walk/fly navigation |
+| `Z` | Shading pie menu (wireframe/solid/material/rendered) |
+| `Alt Z` | Toggle X-ray |
+
+## Selection (Object & Edit Mode)
+
+| Shortcut | Action |
+|---|---|
+| `LMB` | Select |
+| `Shift LMB` | Extend selection |
+| `A` | Select all |
+| `Alt A` | Deselect all |
+| `Ctrl I` | Invert selection |
+| `A A` (twice) | Deselect all (alternative) |
+| `B` | Box select |
+| `C` | Circle select (scroll to resize, `Esc` to exit) |
+| `L` (hover) | Select linked under cursor |
+| `Ctrl L` | Select linked (extends) |
+| `Shift G` | Select similar |
+
+## Object Mode
+
+| Shortcut | Action |
+|---|---|
+| `Tab` | Toggle Edit Mode |
+| `Ctrl Tab` | Mode pie menu |
+| `Shift A` | Add object menu |
+| `X` / `Delete` | Delete selected |
+| `Shift D` | Duplicate |
+| `Alt D` | Linked duplicate (shares mesh data) |
+| `G` / `R` / `S` | Grab / Rotate / Scale |
+| `Alt G` / `Alt R` / `Alt S` | Clear location / rotation / scale |
+| `Ctrl A` | Apply menu (location, rotation, scale, all transforms) |
+| `Ctrl P` | Parent to |
+| `Alt P` | Clear parent |
+| `Ctrl J` | Join selected into active |
+| `M` | Move to collection |
+| `H` / `Alt H` | Hide selected / Unhide all |
+| `Shift H` | Hide unselected |
+| `N` | Toggle sidebar (item/tool/view panels) |
+| `T` | Toggle toolbar |
+| `.` (period) | Pivot point pie menu |
+| `,` (comma) | Transform orientation pie menu |
+
+## Edit Mode (Mesh)
+
+| Shortcut | Action |
+|---|---|
+| `1` / `2` / `3` | Vertex / Edge / Face select mode |
+| `E` | Extrude |
+| `Alt E` | Extrude menu (along normals, individual, etc.) |
+| `I` | Inset |
+| `I I` | Individual inset |
+| `Ctrl B` | Bevel (scroll to add segments) |
+| `Ctrl R` | Loop cut (scroll for count, click to slide) |
+| `K` | Knife tool (Enter to confirm, `Esc` to cancel) |
+| `J` | Join vertices/connect vertex path |
+| `F` | Make face/edge from selection |
+| `M` | Merge menu (at center, at cursor, by distance) |
+| `Alt M` | Merge shortcut |
+| `P` | Separate (by selection / material / loose) |
+| `V` | Rip |
+| `Alt V` | Rip fill |
+| `G G` | Slide (along edge) |
+| `Shift E` | Edge crease (for subsurf) |
+| `Ctrl E` | Edge menu (mark seam, sharp, bridge loops) |
+| `Ctrl F` | Face menu |
+| `Ctrl V` | Vertex menu |
+| `Ctrl N` | Recalculate normals outside |
+| `Shift Ctrl N` | Recalculate inside |
+| `Alt N` | Normals menu (flip) |
+| `U` | UV unwrap menu |
+| `H` / `Alt H` | Hide / Unhide |
+| `O` | Toggle proportional editing (soft falloff; scroll to resize) |
+
+## Sculpt Mode
+
+| Shortcut | Action |
+|---|---|
+| `F` | Resize brush (move mouse, click to set) |
+| `Shift F` | Adjust brush strength |
+| `Ctrl F` | Rotate texture |
+| `S` | Smooth brush (hold for temp smooth) |
+| `X` | Swap primary/secondary color / invert brush |
+| `Ctrl` while sculpting | Inverse brush (e.g. Draw → subtract) |
+| `Shift` while sculpting | Temporary smooth |
+| `[` / `]` | Decrease / increase brush size |
+| `R` | Rotate brush |
+| `M` | Mask brush |
+| `Ctrl I` | Invert mask |
+| `Alt M` | Clear mask |
+
+## UV Editor
+
+| Shortcut | Action |
+|---|---|
+| `U` (in 3D viewport) | Unwrap menu |
+| `P` | Pin vertex |
+| `Alt P` | Unpin |
+| `E` | LSCM live unwrap / Live unwrap toggle |
+| `Ctrl A` | Average islands scale |
+| `Ctrl P` | Pack islands |
+
+## Animation / Timeline / Dope Sheet
+
+| Shortcut | Action |
+|---|---|
+| `Space` | Play / pause animation |
+| `Shift Space` | Play reverse |
+| `Left` / `Right` arrow | Previous / next frame |
+| `Up` / `Down` arrow | Jump to next / previous keyframe |
+| `Shift Left` / `Shift Right` | Start / end of range |
+| `I` | Insert keyframe (menu of channels) |
+| `Alt I` | Clear keyframe |
+| `K` | Keying menu |
+
+## Shader / Node Editors
+
+| Shortcut | Action |
+|---|---|
+| `Shift A` | Add node |
+| `G` | Move node |
+| `F` | Connect selected nodes |
+| `Ctrl X` / `X` | Delete node (keeps connections with Ctrl) |
+| `Shift D` | Duplicate |
+| `M` | Mute node |
+| `H` | Collapse node |
+| `Ctrl G` | Group selected into node group |
+| `Ctrl Alt G` | Ungroup |
+| `Tab` | Enter / exit node group |
+
+## Compositor / Video Sequencer
+
+Most node-editor shortcuts apply. VSE additions:
+
+| Shortcut | Action |
+|---|---|
+| `K` | Cut strip (hard) |
+| `Shift K` | Soft cut |
+| `M` | Mute |
+| `Shift M` | Unmute |
+
+## Quick recipes
+
+- **Flatten N-gon to a quad**: in Edit Mode, select faces → `Alt J` (tris to quads) or `F` to refill.
+- **Make clean bevel**: `Ctrl B`, then scroll mouse wheel for segments, then `S` to set profile shape.
+- **Isolate one object for sculpting**: select object → `Numpad /` enters local view.
+- **Fix flipped faces**: Edit Mode → `A` → `Shift N` (recalc outside). If still wrong, try `Shift Ctrl N` (inside).
+- **Snap object to another object's surface**: `Shift S` → "Selection to Cursor", combined with `Shift Right-click` to place cursor.
+
+## When giving answers
+
+- Always state the **mode** the shortcut is valid in (Object Mode vs. Edit Mode vs. Sculpt etc.) — many keys are reused and differ by mode.
+- If the user is on **Mac**, `Ctrl` usually maps to `Cmd`, but in Blender `Ctrl` still works on Mac for most shortcuts.
+- For anything not in this sheet, suggest `F3` (operator search) and type the English action name — works regardless of user's keymap customizations.
+
+## Sources
+
+- [quickref.me – Blender cheat sheet](https://quickref.me/blender.html)
+- [nachazo/blender-cheat-sheet (GitHub)](https://github.com/nachazo/blender-cheat-sheet)
+- [Official Blender Hotkey Reference PDF](https://download.blender.org/documentation/BlenderHotkeyReference.pdf)
+- [CG Cookie Blender 4.4 hotkey sheet](https://cgcookie.com/downloads/blender-hotkey-cheat-sheet)
+- [SURF Blender 4.1 cheat sheet](https://surf-visualization.github.io/blender-course/references/cheat-sheet-4.1.pdf)

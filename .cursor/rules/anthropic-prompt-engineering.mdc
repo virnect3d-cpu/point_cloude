@@ -1,0 +1,179 @@
+---
+description: Senior-level Anthropic prompt engineering playbook — the five-step ladder (clarity → examples → chain-of-thought → XML structure → roles), XML tag conventions, extended thinking mode, prompt chaining, positional bias, long-context layout, and when each technique helps vs. harms. Use whenever the user is writing or debugging a prompt for Claude, asks why an output is wrong/inconsistent, needs to structure system prompts, wants few-shot examples, is choosing between CoT and extended thinking, or is optimizing a production prompt. Applies to Claude Opus/Sonnet/Haiku 4.x and 4.5+.
+globs:
+alwaysApply: false
+---
+
+# Anthropic Prompt Engineering Skill
+
+Write prompts like someone who's been doing this at Anthropic for 10 years: the default mindset is "treat the model like a very smart, very literal intern who has never seen your codebase or business." Most prompting failures come from ambiguity, buried instructions, or skipping the ladder.
+
+## The Five-Step Ladder (apply in this order, not in reverse)
+
+Anthropic publishes five techniques ranked by impact. **Do not skip steps.** A vague prompt with role-play ("Act as a senior engineer…") will underperform a clear prompt with no role.
+
+1. **Be clear and direct.** Strip filler. State the task, the inputs, the constraints, and the exact output format. If a human would ask "what do you mean?" — so will Claude.
+2. **Show, don't just tell (multishot).** Two or three concrete examples of `input → desired output` beat three paragraphs of instructions. Examples pin down tone, format, and edge cases instruction lists can't.
+3. **Give it time to think (chain of thought).** For any task requiring reasoning, add "Think step by step" or wrap reasoning in `<thinking>` tags. Accuracy climbs, especially on math, code, multi-hop questions.
+4. **Structure with XML tags.** Separate `<instructions>`, `<data>`, `<examples>`, `<output_format>`, `<thinking>`, `<answer>`. Claude was trained on XML-tagged data and parses it reliably. Tag names don't have to be standard — just semantic and consistent.
+5. **Assign a role (system prompt).** `"You are a senior SEC-compliance auditor"` tunes the register and domain. Useful, but only after 1–4 are solid.
+
+## XML tag cookbook
+
+Use tags when a prompt has **two or more of**: instructions, data, examples, output spec, or reasoning.
+
+```xml
+<instructions>
+Classify the email below into one of: billing, support, sales, other.
+Use the examples to match the format exactly.
+</instructions>
+
+<examples>
+<example>
+  <input>My card was charged twice last night</input>
+  <output>billing</output>
+</example>
+<example>
+  <input>Can I schedule a demo for next week?</input>
+  <output>sales</output>
+</example>
+</examples>
+
+<email>
+{{user_email}}
+</email>
+
+<output_format>
+Return only the single category label in lowercase.
+</output_format>
+```
+
+**Conventions that help Claude most:**
+
+- `<instructions>` and `<output_format>` bracket everything — top and bottom (positional bias; see below).
+- Each external document goes in its own `<document>` with `<source>` and `<document_content>`.
+- For data to analyze, use `<data>` or a domain-specific tag (`<email>`, `<transcript>`, `<ticket>`).
+- Pair `<thinking>` with `<answer>` when you want reasoning you can strip and keep separate.
+- Don't invent weird tags like `<prompt_input_data_v2>` — just `<data>` is better. Claude wasn't trained on custom tags, only on the XML convention.
+
+## Positional bias — where you put things matters
+
+LLMs pay most attention to the **beginning** and **end** of the context window (primacy + recency). Order matters:
+
+```
+[ system prompt: role, global rules ]
+[ user message opens with <instructions> ]
+[ long reference material: <documents>, <examples>, <history> ]
+[ current <data> or <question> ]
+[ final reminder of output format or constraints ]
+```
+
+**Consequence for long context:** place 20k+ token documents near the top; place the actual question/request at the bottom. Re-stating key rules just before the model's turn to answer improves adherence by ~30% on long-doc tasks.
+
+## Chain of thought vs. extended thinking — pick one, don't mix
+
+| Situation | What to do |
+|---|---|
+| Non-thinking model (no extended thinking) | Add `"Think step by step in <thinking> tags, then answer in <answer> tags."` Explicit CoT is the win. |
+| Extended-thinking model with `thinking` param enabled | **Remove explicit CoT instructions.** Give high-level guidance ("think carefully about edge cases") and let the model use its reserved thinking budget. Explicit steps constrain the richer internal reasoning. |
+| Math/code/logic, single-turn | CoT helps 100% of the time. Almost never regresses. |
+| Short, trivial classification | Skip CoT. It bloats output and costs tokens. |
+
+Thinking tokens are **not billed as output on extended-thinking models** but they count against the thinking budget. Set `max_thinking_tokens` deliberately (2k is a sane default; 16k+ only for hard multi-step).
+
+## Prompt chaining — when one prompt isn't enough
+
+If one prompt does "research + outline + draft + edit + format," Claude will drop a step under load. Break the work into a pipeline:
+
+```
+P1: Research          → { findings }
+P2: Outline(findings) → { outline }
+P3: Draft(outline)    → { draft_v1 }
+P4: Critique(draft_v1)→ { issues }
+P5: Revise(draft_v1, issues) → { draft_v2 }
+```
+
+Each step gets Claude's full attention. Self-correction chains (generate → review → fix) consistently outperform single-prompt attempts on anything non-trivial.
+
+## Quoting for long-context grounding
+
+When you dump a 40-page PDF into context and ask a question, quality drops unless you scaffold:
+
+```xml
+<instructions>
+Before answering, extract 3–5 verbatim quotes from the document that are most relevant to the question, each inside <quote> tags with page numbers.
+Then answer using only information from those quotes. If the answer isn't supported, say "Not found in document."
+</instructions>
+```
+
+This single technique cuts hallucinations on long-document Q&A by a large margin.
+
+## Output control — parseability first
+
+If downstream code needs to parse the answer:
+
+1. **JSON:** show an exact example inside `<example_output>`. Don't just write "return JSON" — show the schema with representative values. Consider using tool use (structured output) instead of free-text JSON for reliability.
+2. **Prefilled assistant turn:** start the assistant message with `{` or `<answer>` — Claude continues the structure rather than preambling.
+3. **"Only respond with X, no preamble":** surprisingly effective. Combine with prefill.
+4. **Tool use / structured outputs:** the most reliable way to get clean JSON. Use it for any production integration.
+
+## Anti-patterns (don't do these)
+
+- **"Please"/"thanks"/fluff at the top.** Doesn't hurt much, but pushes real instructions down and eats tokens.
+- **Negative-only instructions.** `"Don't be verbose"` is weaker than `"Answer in 2 sentences."` Tell Claude what to do, not only what to avoid.
+- **Role prompt as a band-aid for a bad task description.** Role helps tone, not correctness. Fix step 1 first.
+- **Huge list of 20 rules.** Dedupe, group, and put the top 3 at the start and end. Buried rule #14 is a rule Claude will ignore.
+- **Instructions mid-document.** Anything not in `<instructions>` (or bracketing position) is likely to be treated as data.
+- **Mixing CoT and extended thinking.** Pick one.
+- **Few-shot examples that disagree.** One contradictory example poisons the pattern. All examples must agree on format and logic.
+
+## Production tuning workflow
+
+1. **Evals first** (see `llm-evaluation-design` skill). You can't tune what you can't measure.
+2. **Start from Anthropic's prompt improver** in Claude Console — it applies the ladder automatically as a baseline.
+3. **Measure impact per change.** Don't change three things at once; you won't know which helped.
+4. **Lock in wins.** When a structure works, freeze it and only tune content.
+5. **Cache the stable parts.** System prompt + examples + long docs → cache breakpoint. Dynamic user turn stays outside the cache. (See `claude-api` skill for caching details.)
+
+## Quick templates
+
+**Classification:**
+```xml
+<instructions>Classify {{input}} into: [A, B, C, other]. Return only the label.</instructions>
+<examples>{{3 examples per class}}</examples>
+<input>{{data}}</input>
+```
+
+**Extraction:**
+```xml
+<instructions>Extract fields {name, email, phone} from the text. Return JSON matching <schema>.</instructions>
+<schema>{"name": "string", "email": "string|null", "phone": "string|null"}</schema>
+<text>{{input}}</text>
+```
+
+**Agentic reasoning:**
+```xml
+<instructions>You have tools {A, B, C}. Think in <thinking>, then either call a tool or write <answer>.</instructions>
+<task>{{task}}</task>
+```
+
+**Long-document Q&A:**
+```xml
+<instructions>1. Quote relevant passages from <document> in <quote> tags. 2. Answer the question using only those quotes.</instructions>
+<document>{{doc}}</document>
+<question>{{q}}</question>
+```
+
+## When giving advice
+
+- Always ask if the user has **evals** before tuning. Without evals you're just moving vibes around.
+- Always ask **which model**. Haiku needs more explicit structure; Opus tolerates more freeform; extended-thinking models want less hand-holding.
+- Always check **where the user put the instructions**. 80% of "Claude ignores my rules" bugs are positional.
+
+## Sources
+
+- [Anthropic — Prompt engineering overview](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview)
+- [Anthropic — Use XML tags to structure your prompts](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/use-xml-tags)
+- [Anthropic — Prompting best practices](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices)
+- [AWS — Prompt engineering techniques with Claude on Bedrock](https://aws.amazon.com/blogs/machine-learning/prompt-engineering-techniques-and-best-practices-learn-by-doing-with-anthropics-claude-3-on-amazon-bedrock/)
+- [Anthropic Courses — Prompt Evaluations](https://deepwiki.com/anthropics/courses/4-prompt-evaluations)

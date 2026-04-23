@@ -1,0 +1,103 @@
+---
+description: Analyze and identify files with the .lcc extension. The extension is ambiguous — it maps to at least four unrelated formats (Phase One Capture One Lens Cast Correction, Bystronic laser-cutting program data, Light-O-Rama ShowTime channel config, IBM Voice Type Languages Newuser file). Use when the user mentions a .lcc file, asks how to open/convert/inspect one, needs to disambiguate which producer created it, or is building a tool that must parse it.
+globs:
+alwaysApply: false
+---
+
+# .LCC File Extension Skill
+
+The `.lcc` extension is **ambiguous** — it is reused by at least four unrelated software products. The first job of this skill is **disambiguation**, not parsing.
+
+## Disambiguation first
+
+When a user says "I have a .lcc file", ask or infer:
+
+1. **What app produced or is expected to read it?** The single most useful question.
+2. **What domain?** Photography / sheet-metal fabrication / Christmas lighting / IBM dictation.
+3. **File size hint?** Capture One LCC is image-like (MB-ish). Bystronic program is small text-ish. LOR config is small XML-like. IBM Newuser is a profile dir entry.
+4. **Header bytes**: ask them to run on Windows:
+   ```powershell
+   Get-Content -AsByteStream file.lcc -TotalCount 16 | ForEach-Object { '{0:X2}' -f $_ }
+   ```
+   On *nix / Git Bash: `xxd file.lcc | head -2`
+
+Use the signatures below to identify which of the four formats it is.
+
+## The four known `.lcc` formats
+
+### 1. Phase One Capture One — Lens Cast Correction
+
+**By far the most common meaning today.**
+
+- **Producer**: Phase One Capture One (photography raw processor).
+- **Purpose**: A per-lens / per-aperture calibration image shot against a flat uniform reference ("LCC plate"). Capture One uses it to correct color cast, vignetting, and exposure fall-off across the sensor, especially on tech/medium-format cameras where tilt-shift lenses create strong casts.
+- **Content**: derived from a raw calibration shot; stored as a corrective model plus metadata (lens ID, aperture, focus distance, sensor temp).
+- **How created**: In Capture One, shoot a white diffuser covering the whole frame at the target aperture → right-click image → "Create LCC". Result can be applied to a single image, applied to a selection, or stored as a preset.
+- **Opens in**: Capture One (Express / Pro). Does not open in Lightroom, Photoshop, etc.
+- **Can be exported / reimported** between Capture One sessions.
+- **If you see one with `.lcc`**: photography context, file is usually alongside raw files (IIQ, CR2, NEF, …). Often organized by lens name.
+
+### 2. Bystronic — Laser Cutting System program data
+
+- **Producer**: Bystronic sheet-metal laser cutters (BySoft / ByVision / related CAM toolchain).
+- **Purpose**: Machine program file or cut configuration for a Bystronic laser cutter. Describes the cut job, gas settings, feed rate, piercing strategy, and sometimes the geometry or a reference to it.
+- **Content**: binary/proprietary, edited via BySoft. Used on the shop floor to load a job on the machine.
+- **Opens in**: BySoft (Bystronic proprietary CAM software). There is no public spec.
+- **If you see one with `.lcc`**: industrial manufacturing context, likely accompanied by DXF, DWG, or geo files.
+
+### 3. Light-O-Rama ShowTime — Channel Configuration
+
+- **Producer**: Light-O-Rama (LOR) ShowTime Software Suite, a popular hobbyist / commercial synchronized-lighting controller (Christmas / event lighting).
+- **Purpose**: Saves a channel configuration — mapping of lighting channels to physical controllers / DMX universes / unit IDs.
+- **Format**: ShowTime-specific; paired with `.lms` (LOR Musical Sequence) or `.las` (animation sequence).
+- **Opens in**: Light-O-Rama ShowTime Sequence Editor.
+- **If you see one with `.lcc`**: holiday-lights / show-control context, usually in a folder next to `.lms`/`.loredit` files.
+
+### 4. IBM Voice Type Languages — Newuser file
+
+- **Producer**: IBM Voice Type Languages (legacy, late-1990s speech recognition).
+- **Purpose**: Part of the per-user enrollment / profile data — a "newuser" file used to bootstrap a speaker profile.
+- **Historical only**. Almost certainly not what a modern user encounters unless they are recovering old archives.
+
+## Identification checklist
+
+```
+If the file ships with raw photos (.IIQ, .CR2, .NEF, .ARW) ......... Capture One LCC
+If the file ships with .DXF/.DWG or is on a factory workstation ..... Bystronic laser program
+If the file ships next to .LMS, .LAS, .LOREDIT, .PLAY files ......... Light-O-Rama config
+If the file is from a decades-old IBM OS/2 or early-Windows archive . IBM Voice Type Newuser
+```
+
+If still ambiguous, **inspect the first 64 bytes**. Binary with Capture One / Phase One strings → Capture One. ASCII with `<?xml` or `[Channels]`-style headers → LOR. High-entropy binary with Bystronic-related strings → Bystronic. Old 8.3-style filename with profile hints → IBM.
+
+## Opening / converting
+
+| Format | Open with | Convert to |
+|---|---|---|
+| Capture One LCC | Capture One (Pro/Express) | Apply as correction → export JPEG/TIFF (not the LCC itself) |
+| Bystronic LCC | BySoft | No public converter. Export from BySoft as DXF / step file |
+| LOR LCC | LOR Sequence Editor | Re-create channel map in the target show-control tool; no cross-vendor converter |
+| IBM VTL LCC | No modern app; historical VTL install only | No path forward except reinstalling the legacy software in a VM |
+
+## Parsing guidance (when the user wants to read the file programmatically)
+
+- **Capture One**: format is undocumented. Do not attempt to parse; interoperate via Capture One's own export pipeline (apply LCC + export standard raster). If you need the correction data itself, render a corrected JPEG/TIFF.
+- **Bystronic**: proprietary. Requires reverse engineering; not recommended. Talk to Bystronic support for integration paths (they provide SDKs for partners).
+- **Light-O-Rama**: partial community documentation exists; reading channel maps is feasible with cooperation from the LOR community, but the LCC subset is small — the `.lms` sequence format carries the interesting payload.
+- **IBM VTL**: obsolete; not worth parsing.
+
+## When giving answers
+
+1. **Never** assume the user means Capture One unless the domain is clearly photography. Ask first.
+2. If the user wants to build a converter or parser, push back: for Bystronic / Capture One the answer is "go through the vendor's export, not the binary".
+3. If the user is recovering data (e.g. "my old LCC file won't open"), the most likely fix is "install a current version of the originating app" — enumerate the four producers and let the user pick.
+4. Offer the header-bytes command above as the deterministic disambiguation step.
+
+## Sources
+
+- [FileInfo — .LCC (Capture One Lens Cast Correction)](https://fileinfo.com/extension/lcc)
+- [File.org — LCC file](https://file.org/extension/lcc)
+- [filext.com — LCC File Extension](https://filext.com/file-extension/LCC)
+- [file-extensions.org — LCC](https://www.file-extensions.org/lcc-file-extension)
+- [Solvusoft — LCC file extension](https://www.solvusoft.com/en/file-extensions/file-extension-lcc/)
+- [filewikia.com — .LCC settings files](https://filewikia.com/file-extentions/settings-files/lcc)

@@ -1,0 +1,234 @@
+---
+description: Expert reference for point cloud processing algorithms — registration (ICP, GICP, NDT, RANSAC, TEASER), feature descriptors (FPFH, SHOT, FCGF), segmentation (RANSAC plane, Euclidean, region growing, DBSCAN), filtering (voxel, SOR, passthrough), surface reconstruction (Poisson, ball-pivoting, Marching Cubes), and deep-learning methods (PointNet/++, PointDSC, GeoTransformer). Use when the user asks about processing, aligning, cleaning, classifying, meshing, or analyzing 3D point clouds, or wants to choose between PCL / Open3D / CloudCompare / small_gicp. Covers LiDAR, photogrammetry, structured-light, and laser scanner data.
+globs:
+alwaysApply: false
+---
+
+# Point Cloud Algorithms Skill
+
+When the user asks anything about point cloud processing — registration, segmentation, filtering, features, meshing, deep learning, or library choice — use this reference.
+
+## Decision tree: what does the user actually need?
+
+1. **"Align two clouds"** → Registration. See [Registration](#registration).
+2. **"Clean / denoise / downsample"** → Filtering. See [Filtering & preprocessing](#filtering--preprocessing).
+3. **"Find planes / objects / clusters"** → Segmentation. See [Segmentation](#segmentation).
+4. **"Make a mesh"** → Surface reconstruction. See [Surface reconstruction](#surface-reconstruction).
+5. **"Describe / match points"** → Features. See [Feature descriptors](#feature-descriptors).
+6. **"Classify / segment with AI"** → Deep learning. See [Deep learning](#deep-learning-methods).
+7. **"What library should I use?"** → See [Library picker](#library-picker).
+
+## Core pipeline (canonical order)
+
+```
+Raw scan
+  → Filtering (voxel + SOR + passthrough)
+  → Normal estimation
+  → Keypoint detection (optional)
+  → Feature description (FPFH/SHOT for classical, FCGF for learned)
+  → Coarse registration (RANSAC / TEASER++ / FGR)
+  → Fine registration (ICP / GICP / NDT)
+  → Segmentation (planes, clusters, semantic)
+  → Surface reconstruction (Poisson / BPA) → Mesh
+```
+
+Skipping steps out of order is the #1 source of "my registration doesn't converge" bugs.
+
+## Filtering & preprocessing
+
+| Algorithm | Purpose | Library |
+|---|---|---|
+| **Voxel grid downsample** | Uniform density, faster downstream ops. Typical leaf 0.01–0.05 m for indoor, 0.1–0.5 m for outdoor LiDAR | PCL `VoxelGrid`, Open3D `voxel_down_sample` |
+| **Statistical outlier removal (SOR)** | Removes points with k-NN mean distance > μ+σ·k. Classic sensor-noise cleanup | PCL `StatisticalOutlierRemoval`, Open3D `remove_statistical_outlier` |
+| **Radius outlier removal** | Drop points with fewer than N neighbors in radius r. Simple, fast | PCL `RadiusOutlierRemoval`, Open3D `remove_radius_outlier` |
+| **Pass-through** | Axis-aligned crop, e.g. remove floor/ceiling | PCL `PassThrough` |
+| **Bilateral filter** | Edge-preserving smoothing | PCL, Open3D |
+| **MLS (Moving Least Squares)** | Smooth + resample, fills small holes, gives normals | PCL `MovingLeastSquares` |
+
+**Normal estimation** is required by most feature descriptors and Poisson reconstruction. Use k-NN (typical k=20–30) or radius search. Orient normals toward a viewpoint (`Open3D orient_normals_towards_camera_location`) or use `orient_normals_consistent_tangent_plane`.
+
+## Registration
+
+Registration aligns source cloud to target, outputting a 4×4 transform `T`.
+
+### Classical fine registration (needs good initial guess)
+
+| Algorithm | Core idea | When to use |
+|---|---|---|
+| **Point-to-Point ICP** | Minimize Σ \|\|T·p_i − q_i\|\|² over nearest-neighbor correspondences | Simple baseline, high-overlap cases |
+| **Point-to-Plane ICP** | Minimize point-to-tangent-plane distance. Converges faster on planar surfaces | Indoor / structured environments — usually preferred over P2P |
+| **Generalized ICP (GICP)** | Probabilistic "plane-to-plane" using local covariance at each point | Noisy scans, mixed geometry. Koide's `small_gicp` is the fast modern impl |
+| **NDT (Normal Distributions Transform)** | Voxelize target as Gaussians; maximize likelihood of source points | LiDAR odometry, works without explicit correspondences |
+| **VGICP** | Voxelized GICP — faster variant | Real-time SLAM |
+| **Go-ICP** | Branch-and-bound global optimum ICP | Small clouds where global optimum is required |
+
+### Coarse / global registration (no initial guess)
+
+| Algorithm | Core idea |
+|---|---|
+| **RANSAC on feature matches** | FPFH/SHOT features → random 3-correspondence sampling → verify |
+| **FGR (Fast Global Registration)** | Optimization over FPFH matches using Geman-McClure robust kernel |
+| **TEASER / TEASER++** | Certifiably-optimal via truncated least squares + max-clique. Robust to >95 % outliers |
+| **Super4PCS / 4PCS** | 4-coplanar-point-set based congruent sets |
+| **SAC-IA** | PCL's classical sample-consensus initial alignment |
+
+### Learning-based registration
+
+PointNetLK, Deep Closest Point (DCP), RPM-Net, REGTR, DetarNet predict transformation end-to-end. **PointDSC** and **GeoTransformer** combine learned features with classical geometric verification and are current SOTA on indoor benchmarks (3DMatch).
+
+### Practical recipe (most users)
+
+```python
+# Open3D skeleton
+src = o3d.io.read_point_cloud("src.ply")
+tgt = o3d.io.read_point_cloud("tgt.ply")
+
+# 1. Downsample + normals
+voxel = 0.05
+src_d = src.voxel_down_sample(voxel); tgt_d = tgt.voxel_down_sample(voxel)
+for pcd in (src_d, tgt_d):
+    pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=voxel*2, max_nn=30))
+
+# 2. FPFH features
+fpfh_src = o3d.pipelines.registration.compute_fpfh_feature(
+    src_d, o3d.geometry.KDTreeSearchParamHybrid(radius=voxel*5, max_nn=100))
+fpfh_tgt = o3d.pipelines.registration.compute_fpfh_feature(
+    tgt_d, o3d.geometry.KDTreeSearchParamHybrid(radius=voxel*5, max_nn=100))
+
+# 3. Coarse: RANSAC
+coarse = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
+    src_d, tgt_d, fpfh_src, fpfh_tgt, True, voxel*1.5,
+    o3d.pipelines.registration.TransformationEstimationPointToPoint(False), 3,
+    [o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9),
+     o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(voxel*1.5)],
+    o3d.pipelines.registration.RANSACConvergenceCriteria(100000, 0.999))
+
+# 4. Fine: point-to-plane ICP
+fine = o3d.pipelines.registration.registration_icp(
+    src, tgt, voxel*0.4, coarse.transformation,
+    o3d.pipelines.registration.TransformationEstimationPointToPlane())
+print(fine.transformation)
+```
+
+## Feature descriptors
+
+| Descriptor | Dimensions | Notes |
+|---|---|---|
+| **FPFH** (Fast Point Feature Histogram) | 33 | Standard classical feature. Fast, robust, needs normals |
+| **SHOT** | 352 | Signature of Histograms of OrienTations. More discriminative, slower |
+| **3DMatch** | 512 | Learned 3D patch descriptor (2017) |
+| **FCGF** (Fully Convolutional Geometric Features) | 32 | Sparse-conv, very fast, SOTA-adjacent |
+| **PPF-FoldNet** | 512 | Self-supervised via folding |
+| **SpinNet** | 32 | Rotation-invariant, strong generalization |
+| **GeoTransformer** | 256 | Current SOTA, superpoint-based transformer |
+
+**Rule of thumb:** FPFH is the default for classical pipelines. For learning pipelines on real scans, FCGF or GeoTransformer.
+
+## Keypoint detectors
+
+- **ISS (Intrinsic Shape Signatures)** — classical, eigenvalue-ratio based.
+- **Harris3D** — 3D extension of 2D Harris corner.
+- **SIFT3D** — 3D SIFT.
+- **D3Feat / USIP / SK-Net** — learned detectors, jointly trained with descriptors.
+
+Modern learned pipelines (FCGF, GeoTransformer) often skip explicit keypoint detection and use dense features + sampling.
+
+## Segmentation
+
+### Geometric
+
+| Method | Algorithm | Use |
+|---|---|---|
+| **RANSAC plane/sphere/cylinder** | PCL `SACSegmentation` with SACMODEL_PLANE etc. | Find ground, walls, pipes |
+| **Euclidean cluster extraction** | KD-tree radius → connected components | Separate objects after plane removal |
+| **Region growing** | Seed + normal/curvature similarity | Smooth surface segmentation |
+| **Supervoxel (VCCS)** | Papon et al., oversegmentation like superpixels | Preprocessing for higher-level grouping |
+| **DBSCAN** | Density-based clustering | Noisy clusters with outliers |
+| **Min-cut graph-based** | Foreground/background segmentation | Object extraction with seed |
+
+### Classic indoor recipe
+
+1. Voxel downsample
+2. RANSAC plane → remove floor (largest plane with normal ≈ +Z)
+3. Euclidean cluster → separate objects
+4. Optional: per-cluster bounding box, centroid, PCA axes
+
+### Semantic (deep learning)
+
+PointNet, PointNet++, KPConv, RandLA-Net, Point Transformer v1/v2/v3, Swin3D — dominant for semantic segmentation on S3DIS, ScanNet, SemanticKITTI.
+
+## Surface reconstruction
+
+| Method | Notes |
+|---|---|
+| **Poisson reconstruction** | Kazhdan et al. Needs oriented normals. Best overall smooth surface. `o3d.geometry.TriangleMesh.create_from_point_cloud_poisson` |
+| **Ball-pivoting (BPA)** | Bernardini et al. Preserves detail, can leave holes. Radius tuning required |
+| **Alpha shapes** | Coarse surfaces, good for convex-ish objects |
+| **Marching Cubes** | Over a voxelized SDF (needs implicit representation like TSDF) |
+| **Delaunay / 2.5D triangulation** | For terrain / DEM |
+| **NeRF / NeuS / 3DGS → mesh** | Modern learned alternative, best visual fidelity |
+
+**Rule of thumb:** Poisson for organic smooth; BPA for hard-edged objects if you have dense uniform sampling; TSDF integration + Marching Cubes for RGB-D fusion (KinectFusion-style).
+
+## Deep learning methods
+
+| Task | Key architectures |
+|---|---|
+| Classification / segmentation | PointNet, PointNet++, DGCNN, KPConv, Point Transformer |
+| Large-scene semantic seg | RandLA-Net, SPVCNN, PointNeXt, Point Transformer v3 |
+| Object detection (3D) | VoxelNet, PointPillars, SECOND, CenterPoint, TransFusion |
+| Registration | DCP, PointNetLK, PointDSC, GeoTransformer, REGTR |
+| Completion | PCN, GRNet, PoinTr, SnowflakeNet |
+| Generation | Point-E, GET3D, 3D Gaussian Splatting |
+
+## Library picker
+
+| Library | Strengths | Language |
+|---|---|---|
+| **Open3D** | Modern API, fast, great Python. Registration + reconstruction + visualization. **Default recommendation for most users.** | C++/Python |
+| **PCL** | Largest algorithm coverage, battle-tested, mandatory for ROS1 | C++ (Python bindings limited) |
+| **CloudCompare** | GUI application, great for visual inspection, comparison, manual editing | GUI (C++ internals) |
+| **small_gicp** | Fastest parallel ICP/GICP/VGICP, header-only C++ | C++ + Python |
+| **PyTorch3D / Kaolin** | Deep learning on 3D, differentiable operations | Python |
+| **trimesh** | Simple mesh ops, not really point-cloud focused | Python |
+| **LAStools / PDAL** | LiDAR-specific, LAS/LAZ I/O, tiling, classification | C++ / Python |
+
+**Start here:** Open3D for Python users, PCL if already in C++/ROS, PDAL if working with LAS/LAZ tiles.
+
+## Common file formats
+
+| Format | Stores | Notes |
+|---|---|---|
+| `.ply` | XYZ + RGB + normals + custom properties | ASCII or binary, universal |
+| `.pcd` | XYZ + arbitrary | PCL's native |
+| `.xyz` / `.pts` / `.asc` | XYZ(RGB) text | Simple but slow & large |
+| `.las` / `.laz` | LiDAR industry standard with classification, intensity, GPS time | laz = compressed |
+| `.e57` | Structured scan with images + metadata | ASTM standard, laser scanners |
+| `.obj` / `.stl` | Mesh, not point cloud | Convert after reconstruction |
+
+## Evaluation metrics
+
+- **Registration**: rotation error (deg), translation error (m), RMSE of inlier correspondences, recall @ threshold.
+- **Segmentation**: mIoU, per-class IoU, overall accuracy.
+- **Reconstruction**: Chamfer distance, Hausdorff distance, F-score @ τ.
+- **Detection (3D)**: mAP @ IoU thresholds (usually 0.25, 0.5, 0.7).
+
+## Common pitfalls
+
+1. **Running ICP without voxel downsampling** on huge clouds → kills runtime.
+2. **Missing / un-oriented normals** before Poisson or point-to-plane ICP → garbage output.
+3. **Voxel size too large** relative to scan noise → registration misconverges; **too small** → slow + sensitive to noise.
+4. **Outliers drag registration** — always run SOR or use robust kernels (Huber, Geman-McClure, TEASER).
+5. **Mixing coordinate units** (mm vs m) — scale matters for all thresholds.
+
+## Sources
+
+- [XuyangBai/awesome-point-cloud-registration](https://github.com/XuyangBai/awesome-point-cloud-registration)
+- [jeffdelmerico/pointcloud_tutorial (PCL + Open3D examples)](https://github.com/jeffdelmerico/pointcloud_tutorial)
+- [jyothir-369/point-cloud-processing-open3d](https://github.com/jyothir-369/point-cloud-processing-open3d)
+- [koide3/small_gicp — parallel ICP library](https://github.com/koide3/small_gicp)
+- [Open3D ICP tutorial](https://www.open3d.org/docs/release/tutorial/pipelines/icp_registration.html)
+- [Open3D global registration tutorial](https://www.open3d.org/docs/release/tutorial/pipelines/global_registration.html)
+- [zhulf0804/3D-PointCloud — papers & datasets](https://github.com/zhulf0804/3D-PointCloud)
+- [PCL documentation](https://pointclouds.org/documentation/)
+- [PCD file format](https://pointclouds.org/documentation/tutorials/pcd_file_format.html)

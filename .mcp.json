@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "mcp-unity": {
+      "command": "node",
+      "args": [
+        "C:/Users/VIRNECT/Desktop/cloude/mcp-servers/mcp-unity/Server~/build/index.js"
+      ]
+    }
+  }
+}

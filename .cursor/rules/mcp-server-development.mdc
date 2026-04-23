@@ -1,0 +1,220 @@
+---
+description: Deep reference for building Model Context Protocol (MCP) servers — the three primitives (Tools, Resources, Prompts), client-side counterparts (Sampling, Roots, Elicitation), JSON-RPC 2.0 lifecycle, stdio vs. HTTP transports, capability negotiation, structured tool outputs and output schemas, human-in-the-loop gating, MCP Inspector debugging, and production patterns (single-responsibility servers, error handling, security, schema discipline). Use when the user is writing an MCP server in Python/TypeScript/Go, choosing between a tool and a resource, debugging why Claude doesn't see their tools, designing tool schemas, or deploying an MCP server to production.
+globs:
+alwaysApply: false
+---
+
+# MCP Server Development Skill
+
+MCP is JSON-RPC 2.0 with opinionated semantics. The goal: one standard way for LLM hosts to discover and invoke capabilities, so every AI app doesn't reinvent the tool-calling wheel. A well-built MCP server is small, focused, and schema-disciplined.
+
+## The mental model
+
+```
+ ┌────────────────┐     stdio / HTTP (JSON-RPC 2.0)     ┌────────────────┐
+ │  MCP Client    │ ◀──────────────────────────────────▶│   MCP Server   │
+ │ (Claude Code,  │   1. initialize (capability nego)    │ (your process) │
+ │  Claude Desktop│   2. tools/list, resources/list      │                │
+ │  Cursor, etc.) │   3. tools/call, resources/read      │                │
+ │                │   4. notifications (listChanged)     │                │
+ └────────────────┘                                      └────────────────┘
+```
+
+The **host** (the app) embeds a **client**. The client talks to your **server**. You implement the server.
+
+## The three server-side primitives
+
+Pick the right primitive for the right job. Mixing them up is the #1 reason Claude "doesn't use my stuff."
+
+### Tools — model-controlled actions
+
+**What**: functions the model can call whenever its reasoning says so.
+
+**When to use**: any action with side effects, any dynamic data fetch, anything where the *model* should decide "should I call this?"
+
+**Rule of thumb**: if you want the LLM to invoke it automatically, it's a tool. Full stop.
+
+Key shape (simplified):
+
+```json
+{
+  "name": "get_weather",
+  "title": "Get Weather",
+  "description": "Fetch current weather for a city. Use when the user asks about weather, temperature, or forecast. Do not use for historical weather.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "city": { "type": "string", "description": "City name, e.g. 'Seoul'" },
+      "units": { "type": "string", "enum": ["metric","imperial"], "default": "metric" }
+    },
+    "required": ["city"]
+  },
+  "outputSchema": { ... }   // optional but strongly recommended
+}
+```
+
+### Resources — application-controlled data
+
+**What**: addressable blobs the **client** decides when to read. URI-scheme of your choice.
+
+**When to use**: static or semi-static reference data — a file tree, a document, a database schema, a design doc. The client (or user) picks resources; the model doesn't auto-invoke them.
+
+**Anti-pattern**: exposing dynamic API data as a resource expecting the model to fetch it — most clients won't. Claude Desktop makes users explicitly select resources; Cursor treats them as passive context. If you want the LLM to "just use it," wrap it in a tool.
+
+### Prompts — user-facing templates
+
+**What**: named prompt templates the user picks, often taking arguments.
+
+**When to use**: recurring workflows users want to invoke ("summarize this PR", "draft a release note"). Appear in the client UI (e.g., as slash commands or menu items).
+
+**Rule**: prompts are for humans to pick; tools are for models to pick; resources are for apps to attach.
+
+## Client-side primitives you'll see referenced
+
+- **Sampling** — server asks the client to generate text via the user's LLM. Useful when the server needs an LLM call but doesn't want to manage API keys.
+- **Roots** — the client tells the server which directories/URIs are in scope.
+- **Elicitation** — server asks the client to prompt the user for structured input.
+
+You consume these, not implement them. But knowing they exist keeps you from re-implementing them as tools.
+
+## Protocol lifecycle
+
+1. Client sends `initialize` with its `protocolVersion`, `capabilities`, `clientInfo`.
+2. Server responds with negotiated `protocolVersion`, its `capabilities`, `serverInfo`, optional `instructions`.
+3. Client sends `initialized` notification — now it's live.
+4. Normal message exchange (list/call/read) within the negotiated capability set.
+
+Miss the capability declaration, and the client won't know you have tools. The common "Claude doesn't see my server" bug is a missing `tools: { listChanged: true }` in the server's capability response.
+
+## Transports
+
+| Transport | When |
+|---|---|
+| **stdio** | Local server. Spawned as a subprocess by the client. Simplest. Default for Claude Desktop/Claude Code/Cursor local servers. |
+| **HTTP (+ SSE)** | Remote server. Authenticated endpoints, shared by multiple clients. Use for team/cloud deployments. |
+
+For dev, use stdio — one less failure mode. Move to HTTP only when you need multi-client or remote.
+
+## Tool design — the part that decides quality
+
+A tool is a contract between your server and a language model. Good contracts:
+
+1. **One purpose per tool.** `create_ticket` + `comment_ticket` + `close_ticket`, not `manage_ticket`.
+2. **Short, literal names.** `search_repo`, not `doRepoOps`.
+3. **Description doubles as a mini-prompt.** 50–150 tokens of "use when / do not use". This is the main thing the model reads at tool-selection time.
+4. **Full JSON Schema on inputs.** Every property has a `description`. Mark `required` explicitly. Use `enum` for closed sets, `format` for strings when useful.
+5. **Output schema when the output is structured.** Lets the client validate and lets you document the shape. Return both `structuredContent` (JSON) and a `TextContent` block (serialized) for backward compatibility.
+6. **Errors as data.** Return `{isError: true, content: [{type: "text", text: "reason"}]}` rather than raising. The model can see the error and recover.
+7. **Cap output size.** Long tool outputs bleed context. Summarize, paginate, or offer a companion `fetch_detail(id)` tool.
+8. **Idempotency and undo.** Destructive tools should be idempotent when reasonable and offer an inverse tool.
+9. **Clear auth posture.** Either the tool is safe to call repeatedly, or it requires client confirmation — state which.
+
+### Structured output example
+
+```json
+{
+  "content": [{ "type": "text", "text": "{\"temp_c\": 18, \"condition\": \"clear\"}" }],
+  "structuredContent": { "temp_c": 18, "condition": "clear" }
+}
+```
+
+Setting `outputSchema` on the tool definition lets the client validate `structuredContent`.
+
+## Security and human-in-the-loop
+
+The MCP spec is explicit: **there SHOULD always be a human in the loop** for tool invocation. Your server is responsible for:
+
+- **Not trusting client identity.** If exposed over HTTP, require auth (bearer, mTLS, OAuth).
+- **Input validation.** Schema validation doesn't replace semantic checks — reject suspicious paths, SQL, shell injection on your side.
+- **Clear capability scoping.** Don't expose `run_any_shell_command`. Expose the specific operations you mean to expose.
+- **Audit logging.** Every tool call logged with actor, args, result.
+- **Rate limiting.** Especially for tools that hit paid APIs or do heavy work.
+
+The spec also recommends the host UI show **clear visual indication** when tools are called and **confirmation prompts** for destructive ops. That's the host's job, but your tool `description` can reinforce ("**Destructive**: deletes the record. Confirm with the user before calling.").
+
+## Debugging
+
+- **MCP Inspector** (`mcp dev <script>`) — interactive debugger that speaks the protocol and lets you list/call everything. The first tool you reach for when "it works in curl but Claude can't see it."
+- **stderr is your log.** stdio transport reserves stdout for protocol messages. Log to stderr; the client usually surfaces it.
+- **`--log-level debug`** on clients that support it shows the JSON-RPC traffic.
+- **Reference servers** — clone a server from the official repo, swap your logic in. Most 30-minute "why isn't this working" bugs turn out to be missing capability declarations or wrong response shapes.
+
+## Production checklist
+
+- [ ] Single responsibility — one domain per server.
+- [ ] Tools/resources/prompts chosen correctly.
+- [ ] Every tool has a complete description + input schema with per-field descriptions.
+- [ ] Structured output where applicable, with `outputSchema`.
+- [ ] Errors as data, not exceptions crashing the server.
+- [ ] Output-size caps / pagination on tools that could return large blobs.
+- [ ] Auth on any non-stdio transport.
+- [ ] Input validation beyond schema (semantic checks).
+- [ ] Audit logging of every tool invocation.
+- [ ] Rate limiting on expensive/external calls.
+- [ ] Graceful handling of client disconnects; no zombies.
+- [ ] Capability list correctly declares `listChanged`, etc.
+- [ ] `instructions` field populated with a short server-purpose blurb (optional, but helps hosts).
+- [ ] Tested in MCP Inspector.
+- [ ] Tested from the actual host (Claude Desktop / Claude Code / Cursor).
+- [ ] Versioning strategy for breaking schema changes.
+
+## Official SDKs
+
+- **Python**: `modelcontextprotocol` / `mcp` package. Fastest for prototyping.
+- **TypeScript**: `@modelcontextprotocol/sdk`. Standard for web-stack teams.
+- **Go, Rust, Kotlin, C#, Java**: official or community SDKs exist; check the spec site.
+
+All follow the same protocol; the SDK mostly handles JSON-RPC framing, capability negotiation, and schema marshaling.
+
+## Minimal Python server (sketch)
+
+```python
+from mcp.server import Server
+from mcp.types import Tool, TextContent
+from pydantic import BaseModel
+
+app = Server("weather-server")
+
+class WeatherArgs(BaseModel):
+    city: str
+    units: str = "metric"
+
+@app.tool(
+    name="get_weather",
+    description="Fetch current weather for a city. Use when user asks about weather. Do not use for historical data."
+)
+async def get_weather(args: WeatherArgs) -> list[TextContent]:
+    data = await fetch_weather(args.city, args.units)   # your code
+    return [TextContent(type="text", text=str(data))]
+
+if __name__ == "__main__":
+    app.run_stdio()
+```
+
+## Anti-patterns
+
+- **Shoving API data into resources** expecting the model to auto-fetch. Wrong primitive.
+- **One mega-tool** taking a natural-language blob. Destroys the tool-selection affordance.
+- **Silent errors** (tool returns empty string on failure). Model assumes success, loops.
+- **Unbounded output size.** A tool returning 200 KB chokes the model and burns tokens.
+- **No description on tool or fields.** Model will misuse or ignore the tool.
+- **Tool that requires multiple calls in a specific sequence** without making that obvious — use a higher-level tool or prompt template.
+- **Exposing shell access.** If you must, scope it to a whitelisted set of commands.
+- **Trusting client-provided paths** without validation (path traversal).
+
+## When giving advice
+
+1. Ask **which primitive**. 70% of MCP design questions are really "should this be a tool or a resource?" Answer: is the LLM choosing to invoke it? Tool. Is the app/user attaching it? Resource.
+2. Ask **what transport and auth**. If HTTP without auth, stop them.
+3. Ask to see the **tool description and input schema**. If either is weak, that's the bug before they've even finished describing the symptom.
+4. Push **MCP Inspector** — no one uses it enough.
+5. Remind them of **single-responsibility**. Five small servers beat one giant one.
+
+## Sources
+
+- [Model Context Protocol — Specification (tools)](https://modelcontextprotocol.io/specification/2025-06-18/server/tools)
+- [MCP Best Practices Guide](https://modelcontextprotocol.info/docs/best-practices/)
+- [WorkOS — Understanding MCP features: Tools, Resources, Prompts, Sampling, Roots, Elicitation](https://workos.com/blog/mcp-features-guide)
+- [cyanheads/model-context-protocol-resources — Server dev guide](https://github.com/cyanheads/model-context-protocol-resources/blob/main/guides/mcp-server-development-guide.md)
+- [Official MCP Servers (reference implementations)](https://github.com/modelcontextprotocol/servers)
+- [Stytch — MCP introduction for developers](https://stytch.com/blog/model-context-protocol-introduction/)

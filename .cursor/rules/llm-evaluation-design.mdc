@@ -1,0 +1,208 @@
+---
+description: Senior reference on designing evals for LLM applications — the three grading modes (code, model, human), single-turn vs. multi-turn/agentic evals, where each lives in the lifecycle (CI/CD, pre-launch, production monitoring, transcript review, user feedback, A/B), building golden sets, writing robust LLM-graders, multidimensional rubrics, tool selection (Workbench, Promptfoo, DeepEval, Phoenix/Arize, Bloom), and the discipline of iterating prompts against a measured baseline. Use when the user wants to know if a prompt/agent is working, is about to ship without evals, asks how to measure quality, is choosing an eval framework, or is debating whether a "prompt tweak" actually helped.
+globs:
+alwaysApply: false
+---
+
+# LLM Evaluation Design Skill
+
+Anthropic's Solutions Architects are blunt: **the inability to measure performance is the biggest single blocker of LLM production use cases.** Without evals, prompting is vibes. With evals, prompting becomes engineering. This skill is how to build that measurement apparatus.
+
+## First principles
+
+An eval is: **input → run system → grade output.** That's it. The engineering is in making each step rigorous and repeatable.
+
+Four components of a single eval case:
+
+1. **Input** — the prompt/conversation/task given to the system.
+2. **Golden answer** — what a correct answer looks like. Exact string, structure, or rubric.
+3. **Actual output** — what the system returned.
+4. **Grade** — a comparison producing a score (pass/fail, float, label).
+
+A **suite** is N cases. An **eval run** is your system scored across the suite. You care about aggregate metrics (pass rate, mean score) and per-case failures.
+
+## The three grading modes — pick deliberately
+
+### 1. Code-graded (deterministic)
+
+Compare output to expected with a program. Exact match, regex, JSON-schema validity, does-the-code-compile, does-the-test-pass.
+
+**When**: output has a verifiable structure. Classification labels, extracted fields, generated code, SQL queries, API call shapes.
+
+**Pros**: cheap, fast, 100% reproducible.
+**Cons**: brittle on free-form output. "Paris, France" ≠ "Paris" even if both are correct.
+
+Use code grading wherever it's possible. It's the cheapest eval you'll have.
+
+### 2. Model-graded (LLM-as-judge)
+
+An LLM grades the output against a rubric. Same or different model.
+
+**When**: subjective quality (writing tone, helpfulness, "is this a good summary?"). Free-form correctness where code grading fails.
+
+**How to do it well:**
+
+- **Rubric must be crisp.** Five-bullet list, not a paragraph. Each bullet scorable.
+- **Reference answer helps.** "Here's a good answer; is the candidate at least as good?" is more reliable than "is this good?"
+- **Use structured output.** Judge returns `{score: int, reason: string, criteria: {...}}` — force the format.
+- **Calibrate against humans.** Sample 50 cases, have humans grade, check judge agreement. If < 80% agreement, the rubric is underspecified.
+- **Prefer pairwise comparison for style.** "Is A better than B, or tie?" is more stable than absolute scoring.
+- **Don't let the judge see the reference first on binary correctness tasks** — it biases them. Blind, then compare.
+
+**Pros**: scales, handles subjective.
+**Cons**: judge errors, cost, and risk of overfitting the judge.
+
+### 3. Human-graded
+
+Humans score outputs against a rubric. Gold standard for anything subjective or safety-critical.
+
+**When**: calibrating a model-grader, subjective output where you don't trust LLM judgment yet, novel domains without enough data for a rubric.
+
+**How**: Anthropic's Workbench supports this directly. Or build a simple internal tool. Rubric + 50–200 cases + 2 graders per case + inter-annotator-agreement check.
+
+**Pros**: highest signal, catches things LLMs miss.
+**Cons**: slow, expensive, not CI-friendly.
+
+## The lifecycle — where each eval lives
+
+Different stages need different methods. A mature setup uses all of these.
+
+| Stage | Method | Cadence |
+|---|---|---|
+| Development | Fast code/model-graded micro-suite | Every change (seconds–minutes) |
+| Pre-launch / CI/CD | Full automated eval suite on every PR | Every merge |
+| Launch gate | Human eval on subjective axes | Once per major release |
+| Production monitoring | Live code-graded + sampled LLM-graded | Continuous |
+| A/B testing | Compare variant A vs. B on live traffic with guardrail metrics | Per significant change |
+| Transcript review | Humans read sampled conversations weekly | Weekly |
+| User feedback triage | Classify and route incoming complaints | Daily |
+| Periodic human studies | Re-calibrate LLM judges, catch drift | Quarterly |
+
+Miss any of these and you'll get a class of bug the others don't catch.
+
+## Building a golden set — the actually-hard part
+
+Everyone writes "create the golden set" as a bullet point. It's the hardest, most undervalued step.
+
+**Sources of cases** (combine):
+
+1. **Real production traffic.** Sample recent user prompts; sample the hard ones (retries, complaints).
+2. **Edge cases you've seen break things.** Every bug becomes an eval case forever.
+3. **Synthetic generation.** Prompt an LLM to generate diverse inputs given a spec. Dedupe aggressively.
+4. **Red-team prompts.** Adversarial inputs — jailbreak attempts, ambiguous phrasing, multilingual, weird formatting.
+5. **Distributional coverage.** Explicit categories with quota per category. Otherwise your suite over-represents common cases.
+
+**Size guidance** (broad, depends on variance):
+
+- Smoke: 10–30 cases. Run every change.
+- Regression: 100–500. Run in CI.
+- Acceptance / launch: 500–2000+ with category coverage.
+
+More cases only help if coverage is wider. 2000 near-duplicates < 100 diverse cases.
+
+## Multidimensional rubrics
+
+Most systems have more than one axis of quality. For a support agent:
+
+- **Task success** (did it resolve the ticket?) — code-graded via state check.
+- **Efficiency** (did it finish in ≤ N turns?) — code-graded via transcript length.
+- **Tone** (was it appropriate?) — model-graded with rubric.
+- **Safety** (did it refuse harmful requests?) — code-graded with policy checks + human spot-check.
+
+Report each axis separately. A single "overall score" hides trade-offs and makes regression hunting impossible.
+
+## Agentic / multi-turn evals
+
+As capabilities grow, single-turn evals don't cover agent behavior. Multi-turn eval patterns:
+
+- **Simulated user.** One LLM plays the user, following a persona and a goal script. Your agent interacts with it. Grade on whether the goal was achieved.
+- **Environment-grounded.** Give the agent tools + a verifiable world (codebase, sandbox). Grade on world state (tests pass, file written correctly, record created).
+- **Trajectory grading.** Grade not just the final answer but the path — did it call the right tools in a reasonable order? Optional but catches "right answer for the wrong reason."
+
+Two benchmarks worth knowing: **𝜏-Bench** and **𝜏²-Bench** (multi-turn retail/airline support with user simulators). The structure is copy-worthy even if your domain differs.
+
+## LLM-as-judge: the pitfalls
+
+Judges are LLMs. They inherit LLM problems.
+
+- **Positional bias** — judges prefer whichever option they see first. Randomize order in pairwise grading.
+- **Length bias** — judges over-reward verbose answers. Normalize length or instruct the judge to ignore length.
+- **Sycophancy** — judges over-reward the reference or the "famous" answer. Blind grading helps.
+- **Model-family bias** — Claude judging Claude scores higher than Claude judging GPT-4 (and vice versa). Ensemble judges for high-stakes.
+- **Rubric drift** — judge behavior on the same rubric changes between model versions. Re-calibrate against humans after every model upgrade.
+
+Always **sanity-check judge agreement with humans** on a calibration set before trusting judge scores.
+
+## Tools landscape
+
+| Tool | Strength |
+|---|---|
+| **Anthropic Workbench** | Prototype prompts + evals interactively. Best for small suites and human grading. |
+| **Promptfoo** | OSS CLI + YAML config. CI-friendly. Multi-provider. Great starter choice. |
+| **DeepEval (Confident AI)** | OSS + SaaS. Strong metric library (G-Eval, hallucination, faithfulness). Integrates with Anthropic SDK. |
+| **Arize Phoenix / AX** | OSS + SaaS. Tracing + eval + production monitoring together. |
+| **LangSmith** | If you're already on LangChain. Tracing + evals + dataset mgmt. |
+| **Braintrust** | Eval-first platform; good for dataset management and prompt experiments. |
+| **Inspect (UK AISI)** | Serious eval framework, safety-oriented. |
+| **Anthropic Bloom** | Behavioral eval generation. Measures how often a behavior appears across scenarios. |
+| **Homegrown script** | Often correct for < 1k cases. Don't underestimate it. |
+
+**Advice**: pick one that fits your stack in a day; don't burn a week on tool selection. The data (cases + rubric) is 10× more valuable than the framework.
+
+## The iteration loop
+
+```
+baseline eval → change prompt → re-run eval → compare
+                     ↑                           │
+                     └───────────────────────────┘
+```
+
+Discipline:
+
+1. **Measure baseline first.** Never tune a prompt without a number.
+2. **One change per run.** If you tuned two things, you don't know which one won.
+3. **Promote only on significant wins.** On a 500-case suite, a 1% swing is noise. Use bootstrapped confidence intervals if you care.
+4. **Always eyeball failures.** Aggregate metrics hide patterns. Read the 10 worst cases every run.
+5. **Log prompts and outputs.** Reproducibility matters; yesterday's prompt is tomorrow's mystery.
+
+## Production monitoring
+
+Pre-launch evals catch known failure modes. Production monitoring catches the ones you didn't anticipate.
+
+- **Distribution drift** — input length, language mix, topic distribution vs. your eval set.
+- **Output anomalies** — refusal rate, average response length, JSON parse failure rate.
+- **Latency and cost** — regressions often show here first.
+- **Tool-call health** — error rates per tool, tool selection frequency.
+- **User feedback signal** — thumbs up/down, explicit complaint flags, retries.
+
+Sample 1–5% of production transcripts into an LLM-judge pipeline to get continuous subjective scoring. Combine with weekly human spot-checks of the sampled worst-scoring cases.
+
+## Anti-patterns
+
+- **No evals, just gut feel.** "It looks better" doesn't ship.
+- **One-number overall score.** Hides trade-offs.
+- **Judging with the same model and prompt you're evaluating.** Tautology.
+- **Golden set of 20 happy-path cases.** Guarantees you'll miss everything important.
+- **LLM-judge never calibrated against humans.** The judge is a black box, and nobody checked.
+- **Regressing without noticing.** No CI → no regression detection → silent decay.
+- **Eval suite that takes 30 minutes to run.** Nobody will run it per-change. Have a fast smoke + slow full.
+- **No failure review.** The scores went up. Why? Nobody knows. Don't be this team.
+- **Evals only on cherry-picked production cases.** Leaks the test set into the training of your prompt tuning. Hold out a frozen eval set.
+
+## When giving advice
+
+1. Ask **what "success" means in executable terms**. If they can't answer, eval design starts there.
+2. Ask **how they know the last prompt change helped**. If the answer is "I tried it a few times," push evals.
+3. Start with **code-graded + small smoke suite**. 30 cases, 2 hours of work, immediate value.
+4. Push **reading the worst 10 failures** every run. The gap between aggregate and actual behavior lives there.
+5. Remind them **evals get reused** across model upgrades. The investment compounds.
+
+## Sources
+
+- [Anthropic — Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
+- [Anthropic Courses — Evaluation Approaches](https://deepwiki.com/anthropics/courses/4.1-evaluation-approaches)
+- [Anthropic Courses — Prompt Evaluations](https://deepwiki.com/anthropics/courses/4-prompt-evaluations)
+- [Anthropic Alignment — Bloom auto-evals](https://alignment.anthropic.com/2025/bloom-auto-evals/)
+- [DeepEval — Anthropic integration](https://deepeval.com/integrations/frameworks/anthropic)
+- [Promptfoo — LLM eval framework](https://www.promptfoo.dev/)
+- [τ-Bench / τ²-Bench — multi-turn agent benchmarks](https://github.com/sierra-research/tau-bench)
