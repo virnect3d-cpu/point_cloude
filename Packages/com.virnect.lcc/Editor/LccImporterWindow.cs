@@ -38,14 +38,9 @@ namespace Virnect.Lcc.Editor
         bool  _attachLodStreamer = true;
         int _selectedIndex = -1;
 
-        // Foldouts
-        bool _foldQuickStart = true;
-        bool _foldScenes     = true;
-        bool _foldRender     = true;
-        bool _foldActions    = true;
-        bool _foldServer     = true;
-        bool _foldCompare    = false;
-        bool _foldSelected   = false;
+        // Tabs
+        enum Tab { Scenes, Server, Compare, Info }
+        Tab _tab = Tab.Scenes;
 
         // Server state
         bool   _serverHealthy = false;
@@ -81,17 +76,58 @@ namespace Virnect.Lcc.Editor
         void OnGUI()
         {
             _TopBar();
+            _TabBar();
+            EditorGUILayout.Space(4);
+
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
-
-            _QuickStartSection();
-            _ScenesSection();
-            _RenderSettingsSection();
-            _ActionsSection();
-            _ServerSection();
-            _ApiCompareSection();
-            _InspectSelectedSection();
-
+            switch (_tab)
+            {
+                case Tab.Scenes:
+                    _ScenesSection();
+                    _RenderSettingsSection();
+                    _ActionsSection();
+                    break;
+                case Tab.Server:
+                    _ServerSection();
+                    break;
+                case Tab.Compare:
+                    _ApiCompareSection();
+                    break;
+                case Tab.Info:
+                    _QuickStartSection();
+                    _InspectSelectedSection();
+                    break;
+            }
             EditorGUILayout.EndScrollView();
+        }
+
+        // ── Tab bar ───────────────────────────────────────────────────────
+        void _TabBar()
+        {
+            var tabStyle = new GUIStyle(EditorStyles.toolbarButton)
+            { fixedHeight = 26, fontSize = 12 };
+            var activeStyle = new GUIStyle(tabStyle)
+            { fontStyle = FontStyle.Bold,
+              normal = { textColor = new Color(0.55f, 0.85f, 1.0f) } };
+
+            int active = 0; foreach (var s in _slots) if (s.enabled && s.scene != null) active++;
+            string scenesLabel  = $"📂 Scenes ({_slots.Count})";
+            string serverLabel  = _serverHealthy ? "🐍 Server ●" : "🐍 Server ○";
+            string compareLabel = "📐 Compare";
+            string infoLabel    = "🔍 Info";
+
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                _TabButton(Tab.Scenes,  scenesLabel,  tabStyle, activeStyle);
+                _TabButton(Tab.Server,  serverLabel,  tabStyle, activeStyle);
+                _TabButton(Tab.Compare, compareLabel, tabStyle, activeStyle);
+                _TabButton(Tab.Info,    infoLabel,    tabStyle, activeStyle);
+            }
+        }
+        void _TabButton(Tab t, string label, GUIStyle normal, GUIStyle active)
+        {
+            if (GUILayout.Button(label, _tab == t ? active : normal, GUILayout.MinWidth(90)))
+                _tab = t;
         }
 
         // ── Top status bar ────────────────────────────────────────────────
@@ -128,31 +164,26 @@ namespace Virnect.Lcc.Editor
         // ── Quick start card ──────────────────────────────────────────────
         void _QuickStartSection()
         {
-            _foldQuickStart = EditorGUILayout.BeginFoldoutHeaderGroup(_foldQuickStart, "🚀 Quick Start");
-            if (_foldQuickStart)
+            EditorGUILayout.LabelField("🚀 Quick Start", EditorStyles.boldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
-                {
-                    EditorGUILayout.LabelField(
-                        "1. `.lcc` 파일이 든 폴더를 Project 에 복사\n" +
-                        "2. 아래 씬 리스트에 `LccScene` 에셋 드래그\n" +
-                        "3. Render Settings 에서 모드/LOD 선택\n" +
-                        "4. ▶ 월드로 인스턴스화 → Scene 뷰에 바로 렌더\n" +
-                        "(비교 분석 기능은 '🐍 Python 백엔드' 섹션에서 Start Server 후 사용)",
-                        EditorStyles.wordWrappedMiniLabel);
-                }
+                EditorGUILayout.LabelField(
+                    "1. `.lcc` 파일이 든 폴더를 Project 에 복사\n" +
+                    "2. 'Scenes' 탭의 리스트에 `LccScene` 에셋 드래그\n" +
+                    "3. Render Settings 에서 모드/LOD 선택\n" +
+                    "4. ▶ 월드로 인스턴스화 → Scene 뷰에 바로 렌더\n" +
+                    "5. (선택) 'Server' 탭에서 Start → 'Compare' 탭에서 3D 스캔 Hausdorff",
+                    EditorStyles.wordWrappedMiniLabel);
             }
-            EditorGUILayout.EndFoldoutHeaderGroup();
             EditorGUILayout.Space(2);
         }
 
         // ── Scenes ────────────────────────────────────────────────────────
         void _ScenesSection()
         {
-            _foldScenes = EditorGUILayout.BeginFoldoutHeaderGroup(_foldScenes, "📂 LCC Scenes");
-            if (_foldScenes)
+            EditorGUILayout.LabelField("📂 LCC Scenes", EditorStyles.boldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
                 {
                     int removeIdx = -1;
                     for (int i = 0; i < _slots.Count; i++)
@@ -182,17 +213,15 @@ namespace Virnect.Lcc.Editor
                     }
                 }
             }
-            EditorGUILayout.EndFoldoutHeaderGroup();
             EditorGUILayout.Space(2);
         }
 
         // ── Render settings ───────────────────────────────────────────────
         void _RenderSettingsSection()
         {
-            _foldRender = EditorGUILayout.BeginFoldoutHeaderGroup(_foldRender, "🎨 Render Settings");
-            if (_foldRender)
+            EditorGUILayout.LabelField("🎨 Render Settings", EditorStyles.boldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
                 {
                     _renderMode = (RenderMode)EditorGUILayout.EnumPopup(
                         new GUIContent("모드", "Splat: 3D 가우시안 빌보드 · Point: 하드웨어 1px 포인트"), _renderMode);
@@ -233,17 +262,15 @@ namespace Virnect.Lcc.Editor
                     }
                 }
             }
-            EditorGUILayout.EndFoldoutHeaderGroup();
             EditorGUILayout.Space(2);
         }
 
         // ── Actions ───────────────────────────────────────────────────────
         void _ActionsSection()
         {
-            _foldActions = EditorGUILayout.BeginFoldoutHeaderGroup(_foldActions, "⚡ Actions");
-            if (_foldActions)
+            EditorGUILayout.LabelField("⚡ Actions", EditorStyles.boldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
                 {
                     var active = _ActiveSlots();
                     var big = new GUIStyle(GUI.skin.button)
@@ -274,18 +301,15 @@ namespace Virnect.Lcc.Editor
                     GUI.backgroundColor = redPrev;
                 }
             }
-            EditorGUILayout.EndFoldoutHeaderGroup();
             EditorGUILayout.Space(2);
         }
 
         // ── Python backend server ─────────────────────────────────────────
         void _ServerSection()
         {
-            _foldServer = EditorGUILayout.BeginFoldoutHeaderGroup(_foldServer,
-                $"🐍 Python 백엔드  ·  {(_serverHealthy ? "online" : "offline")}");
-            if (_foldServer)
+            EditorGUILayout.LabelField($"🐍 Python 백엔드 · {(_serverHealthy ? "online" : "offline")}", EditorStyles.boldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
                 {
                     EditorGUILayout.LabelField(
                         "실행.bat 의 Python 설치·실행을 창 안에서 처리. 3D 스캔 비교 기능을 쓰려면 이 서버가 필요합니다.",
@@ -340,17 +364,15 @@ namespace Virnect.Lcc.Editor
                     }
                 }
             }
-            EditorGUILayout.EndFoldoutHeaderGroup();
             EditorGUILayout.Space(2);
         }
 
         // ── v2 API compare ────────────────────────────────────────────────
         void _ApiCompareSection()
         {
-            _foldCompare = EditorGUILayout.BeginFoldoutHeaderGroup(_foldCompare, "📐 3D 스캔 비교 (Hausdorff)");
-            if (_foldCompare)
+            EditorGUILayout.LabelField("📐 3D 스캔 비교 (Hausdorff)", EditorStyles.boldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
                 {
                     using (new EditorGUI.DisabledScope(!_serverHealthy))
                     {
@@ -388,7 +410,6 @@ namespace Virnect.Lcc.Editor
                     }
                 }
             }
-            EditorGUILayout.EndFoldoutHeaderGroup();
             EditorGUILayout.Space(2);
         }
 
@@ -396,28 +417,40 @@ namespace Virnect.Lcc.Editor
         void _InspectSelectedSection()
         {
             var s = _SelectedScene();
-            _foldSelected = EditorGUILayout.BeginFoldoutHeaderGroup(_foldSelected,
-                "🔍 Selected scene" + (s != null ? " · " + s.name : ""));
-            if (_foldSelected && s != null && s.manifest != null)
+            EditorGUILayout.LabelField("🔍 Selected scene" + (s != null ? " · " + s.name : ""),
+                                       EditorStyles.boldLabel);
+            if (s == null)
             {
-                var m = s.manifest;
-                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
-                {
-                    EditorGUILayout.LabelField("name", m.name);
-                    EditorGUILayout.LabelField("totalSplats", m.totalSplats.ToString("N0"));
-                    EditorGUILayout.LabelField("source / type", $"{m.source} / {m.dataType}");
-                    if (m.boundingBox != null)
-                    {
-                        var sz = new Vector3(m.boundingBox.max[0] - m.boundingBox.min[0],
-                                             m.boundingBox.max[1] - m.boundingBox.min[1],
-                                             m.boundingBox.max[2] - m.boundingBox.min[2]);
-                        EditorGUILayout.LabelField("bbox size", $"{sz.x:F2} × {sz.y:F2} × {sz.z:F2} m");
-                    }
-                    EditorGUILayout.LabelField("data.bin",
-                        System.IO.File.Exists(s.DataBinPath) ? "✓ exists" : "✗ missing");
-                }
+                EditorGUILayout.HelpBox("Scenes 탭에서 ▸ 버튼을 눌러 씬을 선택하면 여기 정보가 뜹니다.", MessageType.Info);
+                return;
             }
-            EditorGUILayout.EndFoldoutHeaderGroup();
+            if (s.manifest == null) { EditorGUILayout.HelpBox("매니페스트 파싱 실패", MessageType.Warning); return; }
+
+            var m = s.manifest;
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField("name", m.name);
+                EditorGUILayout.LabelField("totalSplats", m.totalSplats.ToString("N0"));
+                EditorGUILayout.LabelField("source / type", $"{m.source} / {m.dataType}");
+                EditorGUILayout.LabelField("LOD count", m.totalLevel.ToString());
+                if (m.splats != null)
+                {
+                    var sb = new StringBuilder();
+                    for (int i = 0; i < m.splats.Length; i++)
+                        sb.Append(i == 0 ? "" : ", ").Append(m.splats[i].ToString("N0"));
+                    EditorGUILayout.LabelField("splats/LOD", sb.ToString());
+                }
+                if (m.boundingBox != null)
+                {
+                    var sz = new Vector3(m.boundingBox.max[0] - m.boundingBox.min[0],
+                                         m.boundingBox.max[1] - m.boundingBox.min[1],
+                                         m.boundingBox.max[2] - m.boundingBox.min[2]);
+                    EditorGUILayout.LabelField("bbox size", $"{sz.x:F2} × {sz.y:F2} × {sz.z:F2} m");
+                }
+                EditorGUILayout.LabelField("encoding / epsg", $"{m.encoding} / {m.epsg}");
+                EditorGUILayout.LabelField("data.bin",
+                    System.IO.File.Exists(s.DataBinPath) ? "✓ exists" : "✗ missing");
+            }
         }
 
         // ── Helpers / actions ─────────────────────────────────────────────
