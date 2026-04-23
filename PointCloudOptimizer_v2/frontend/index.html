@@ -1,0 +1,1362 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PointCloud Optimizer</title>
+  <link rel="stylesheet" href="css/style.css">
+
+</head>
+<body>
+
+<!-- ── 단축키 오버레이 (? 키로 열림) ───────────────────────────────── -->
+<div class="kbd-overlay" id="kbd-overlay" onclick="if(event.target===this) toggleShortcutsHelp(false)">
+  <div class="kbd-box">
+    <div class="kbd-title">⌨️ 키보드 단축키 <span style="margin-left:auto;font-size:11px;color:#888;font-weight:400">(Esc 또는 ? 닫기)</span></div>
+    <div class="kbd-section-title">공통</div>
+    <div class="kbd-row"><span class="kbd-key">?</span><span class="kbd-desc">이 치트시트 열기/닫기</span></div>
+    <div class="kbd-row"><span class="kbd-key">Esc</span><span class="kbd-desc">모달/다이얼로그 닫기</span></div>
+    <div class="kbd-section-title">뷰어 네비게이션 (Page 2/3/4)</div>
+    <div class="kbd-row"><span class="kbd-key">Alt+LMB</span><span class="kbd-desc">회전 (Maya 스타일)</span></div>
+    <div class="kbd-row"><span class="kbd-key">Alt+MMB</span><span class="kbd-desc">패닝</span></div>
+    <div class="kbd-row"><span class="kbd-key">Alt+RMB</span><span class="kbd-desc">줌 (또는 마우스 휠)</span></div>
+    <div class="kbd-row"><span class="kbd-key">F</span><span class="kbd-desc">전체 보기 (카메라를 오브젝트에 맞춤)</span></div>
+    <div class="kbd-section-title">Page 2 (유니티 콜라이더)</div>
+    <div class="kbd-row"><span class="kbd-key">Ctrl+Z</span><span class="kbd-desc">되돌리기 (박스 추가/삭제/초기화)</span></div>
+    <div class="kbd-row"><span class="kbd-key">Ctrl+Y</span><span class="kbd-desc">앞으로 (redo)</span></div>
+    <div class="kbd-section-title">Page 4 (텍스처 베이크)</div>
+    <div class="kbd-row"><span class="kbd-key">메쉬 클릭</span><span class="kbd-desc">Transform 기즈모 활성화</span></div>
+    <div class="kbd-row"><span class="kbd-key">W</span><span class="kbd-desc">이동 모드</span></div>
+    <div class="kbd-row"><span class="kbd-key">E</span><span class="kbd-desc">회전 모드</span></div>
+    <div class="kbd-row"><span class="kbd-key">R</span><span class="kbd-desc">스케일 모드</span></div>
+    <div class="kbd-row"><span class="kbd-key">Esc</span><span class="kbd-desc">기즈모 해제</span></div>
+  </div>
+</div>
+
+
+<header>
+  <div style="font-size:22px">⬡</div>
+  <h1>PointCloud Optimizer</h1>
+  <span class="hdr-meta" id="hdr-version">v3.0 · 데스크톱 앱</span>
+  <span id="hdr-build-badge" title="빌드 정보" style="
+         display:inline-flex;align-items:center;gap:6px;margin-left:4px;
+         padding:3px 8px;border-radius:10px;background:#253A25;
+         border:1px solid #3A5A3A;color:#A8D8A8;font-size:10px;
+         font-weight:600;letter-spacing:0.3px">
+    <span style="width:6px;height:6px;border-radius:50%;background:#6FD86F;
+                 box-shadow:0 0 4px #6FD86F;display:inline-block"></span>
+    Build <span id="hdr-build-date">—</span>
+  </span>
+  <span id="hdr-compat-badge" title="포맷 호환성 — 클릭 시 가이드" style="
+         display:inline-flex;align-items:center;gap:4px;margin-left:4px;
+         padding:3px 8px;border-radius:10px;background:#1E2A3A;
+         border:1px solid #3A4A6A;color:#9ACAFF;font-size:10px;
+         font-weight:600;cursor:help">
+    OBJ✓ GLB✓ FBX<sup style="font-size:8px">△</sup>
+  </span>
+  <button onclick="toggleShortcutsHelp(true)" data-tip="키보드 단축키 보기 (?)"
+    style="background:#2A2A2A;border:1px solid var(--border);color:#C0C0C0;
+           border-radius:6px;padding:6px 10px;font-size:11px;cursor:pointer;font-weight:700">
+    ⌨️ ?
+  </button>
+</header>
+<script>
+  // 빌드 날짜 — fetch index.html Last-Modified 헤더에서 가져오기
+  (function() {
+    try {
+      fetch('/', {method: 'HEAD'}).then(r => {
+        const lm = r.headers.get('Last-Modified');
+        if (lm) {
+          const d = new Date(lm);
+          const yy = String(d.getFullYear()).slice(2);
+          const mm = String(d.getMonth()+1).padStart(2,'0');
+          const dd = String(d.getDate()).padStart(2,'0');
+          const el = document.getElementById('hdr-build-date');
+          if (el) el.textContent = `${yy}.${mm}.${dd}`;
+        } else {
+          // 폴백: 오늘 날짜
+          const d = new Date();
+          const yy = String(d.getFullYear()).slice(2);
+          const mm = String(d.getMonth()+1).padStart(2,'0');
+          const dd = String(d.getDate()).padStart(2,'0');
+          const el = document.getElementById('hdr-build-date');
+          if (el) el.textContent = `${yy}.${mm}.${dd}`;
+        }
+      }).catch(() => {});
+    } catch (e) {}
+
+    // 호환성 배지 클릭 시 토스트 안내
+    const cb = document.getElementById('hdr-compat-badge');
+    if (cb) {
+      cb.addEventListener('click', () => {
+        if (typeof appNotify === 'function') {
+          appNotify(
+            '📐 포맷 호환성 가이드\n\n' +
+            '✓ OBJ+MTL+PNG — Blender/Unity/Maya/Godot 전부 OK (범용)\n' +
+            '✓ GLB — Blender 네이티브, Unity는 glTFast 패키지 설치 시 OK\n' +
+            '△ FBX — Blender 호환, Unity/Maya는 GLB 권장\n\n' +
+            '상세한 다운로드 버튼 근처에 포맷별 안내가 있습니다.'
+          );
+        }
+      });
+    }
+  })();
+</script>
+<nav class="tab-bar">
+  <button class="tab-btn active" id="tab-btn-1" onclick="switchTab(1)">📦 최적화</button>
+  <button class="tab-btn" id="tab-btn-2" onclick="switchTab(2)">🎮 유니티 콜라이더</button>
+  <button class="tab-btn" id="tab-btn-3" onclick="switchTab(3)">🔺 메쉬 변환</button>
+  <button class="tab-btn" id="tab-btn-4" onclick="switchTab(4)">🖼 텍스처 베이크</button>
+  <button class="tab-btn" id="tab-btn-5" onclick="switchTab(5)">📷 사진 텍스처</button>
+
+  <!-- 🚀 전체 자동 처리 (Page 1→2→3→4 순차 실행) — 상단 바 통합 -->
+  <div class="auto-nav-wrap">
+    <div id="auto-prog-wrap" class="auto-nav-prog">
+      <div class="auto-nav-prog-bar"><div id="auto-prog-fill"></div></div>
+      <div id="auto-prog-msg">대기 중...</div>
+    </div>
+    <select id="auto-lod" class="auto-nav-sel" title="품질 (LOD)">
+      <option value="fast">LOD1</option>
+      <option value="balanced">LOD2</option>
+      <option value="quality" selected>LOD3</option>
+    </select>
+    <select id="auto-tex" class="auto-nav-sel" title="텍스처 해상도">
+      <option value="1024">1K</option>
+      <option value="2048" selected>2K</option>
+      <option value="4096">4K</option>
+    </select>
+    <button class="auto-nav-btn" id="auto-run-btn" onclick="runAutoPipeline()" disabled
+      title="Page 2·3·4 순차 실행 — 파일 로드 후 사용">
+      🚀 전체 자동 처리
+    </button>
+  </div>
+</nav>
+
+<!-- ══ PAGE 1 ══════════════════════════════════════════════════════════ -->
+<div id="page1">
+<div class="wrap">
+
+  <!-- ── 왼쪽 컬럼: 설정 영역 ─────────────────────────────────────── -->
+  <div class="col-left">
+
+    <!-- 입력 -->
+    <div class="section">
+      <div class="section-title">📂 입력 파일</div>
+      <div class="drop-zone" id="drop-zone">
+        <div class="icon">☁️</div>
+        <div style="font-size:14px;font-weight:600">파일을 여기에 드래그하거나 클릭하세요</div>
+        <div class="fmt-grid">
+          <span class="fmt-badge pc">.ply</span>
+          <span class="fmt-badge pc">.xyz</span>
+          <span class="fmt-badge pc">.pts</span>
+          <span class="fmt-badge pc">.pcd</span>
+          <span class="fmt-badge pc">.las</span>
+          <span class="fmt-badge pc">.obj</span>
+          <span class="fmt-badge pc">.ptx</span>
+          <span class="fmt-badge pc">.csv</span>
+          <span class="fmt-badge pc">.txt</span>
+          <span class="fmt-badge gs">.splat</span>
+          <span class="fmt-badge gs">.ksplat</span>
+          <span class="fmt-badge gs">GS-PLY</span>
+        </div>
+        <div class="filename" id="file-name"></div>
+      </div>
+      <input type="file" id="file-input"
+        accept=".ply,.xyz,.pts,.pcd,.las,.laz,.obj,.ptx,.csv,.txt,.splat,.ksplat">
+      <!-- 포맷 정보 바 -->
+      <div class="fmt-bar" id="fmt-bar">
+        <span class="fmt-name" id="fmt-name"></span>
+        <span class="fmt-type" id="fmt-type"></span>
+        <span class="fmt-pts" id="fmt-pts"></span>
+      </div>
+    </div>
+
+    <!-- 🚀 전체 자동 처리 — 상단 탭 바로 이동됨 (auto-nav-wrap) -->
+
+    <!-- 품질 -->
+    <div class="section">
+      <div class="section-title">🎚️ 생성할 품질 레벨</div>
+      <div class="quality-grid">
+        <div class="q-card active" data-q="60">
+          <div class="q-num">60%</div>
+          <div class="q-label">scene_opt_60.ply</div>
+          <div class="q-desc">High · PC / XR 고사양</div>
+        </div>
+        <div class="q-card active" data-q="40">
+          <div class="q-num">40%</div>
+          <div class="q-label">scene_opt_40.ply</div>
+          <div class="q-desc">Medium · 일반 디바이스</div>
+        </div>
+        <div class="q-card active" data-q="20">
+          <div class="q-num">20%</div>
+          <div class="q-label">scene_opt_20.ply</div>
+          <div class="q-desc">Low · 모바일 / WebXR</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 출력 폴더 -->
+    <div class="section">
+      <div class="section-title">💾 저장 위치</div>
+      <div class="out-folder-box">
+        <div class="of-icon">📁</div>
+        <div class="of-info">
+          <div class="of-label">출력 폴더</div>
+          <div class="of-path fallback" id="of-path">브라우저 기본 다운로드 폴더</div>
+        </div>
+        <span class="of-badge dl" id="of-badge">기본</span>
+        <button class="btn secondary" id="of-btn" style="padding:7px 14px;font-size:12px">
+          📂 폴더 선택
+        </button>
+        <button class="btn secondary" id="of-clear-btn"
+          style="padding:7px 10px;font-size:12px;display:none" title="선택 해제">✕</button>
+      </div>
+      <div id="of-warn" style="display:none;font-size:11px;color:var(--warn);margin-top:6px;padding:0 4px">
+        ⚠️ 이 브라우저는 폴더 직접 저장을 지원하지 않습니다 (Chrome/Edge 권장).
+        파일은 브라우저 다운로드 폴더로 저장됩니다.
+      </div>
+    </div>
+
+    <!-- 실행 -->
+    <div class="section">
+      <div class="btn-row">
+        <button class="btn" id="run-btn" disabled>🚀 변환 시작</button>
+        <button class="btn secondary" id="clear-btn">🗑 초기화</button>
+      </div>
+    </div>
+
+  </div><!-- /col-left -->
+
+  <!-- ── 오른쪽 컬럼: 상태 / 로그 / 결과 ──────────────────────────── -->
+  <div class="col-right">
+
+    <!-- 진행 -->
+    <div class="section" id="prog-section" style="display:none">
+      <div class="section-title">📊 진행 상황</div>
+      <div class="prog-bar-bg"><div class="prog-bar" id="prog-bar"></div></div>
+      <div class="prog-text" id="prog-text">준비 중...</div>
+    </div>
+
+    <!-- 로그 -->
+    <div class="section">
+      <div class="section-title">📋 로그</div>
+      <div class="log" id="log-box">대기 중...\n</div>
+    </div>
+
+    <!-- 결과 -->
+    <div class="section" id="result-section" style="display:none">
+      <div class="section-title">✅ 출력 파일</div>
+      <div class="file-list" id="file-list"></div>
+      <div style="margin-top:10px">
+        <button class="btn" id="dl-all-btn">📦 전체 다운로드</button>
+      </div>
+      <!-- 저장 완료 토스트 -->
+      <div class="save-toast" id="save-toast">
+        <div class="st-icon" id="st-icon">✅</div>
+        <div class="st-body">
+          <div class="st-title" id="st-title">저장 완료</div>
+          <div class="st-path" id="st-path"></div>
+        </div>
+        <button class="st-open" id="st-open-btn" style="display:none">📂 폴더 열기</button>
+      </div>
+    </div>
+
+  </div><!-- /col-right -->
+
+</div><!-- /wrap -->
+</div><!-- /page1 -->
+
+<!-- setup-modal removed (Ollama/AI features removed) -->
+
+<!-- 인앱 알림 (시스템 alert 대체) -->
+<div class="app-dlg-bg" id="app-dlg" style="display:none" onclick="if(event.target===this)closeAppDlg()">
+  <div class="app-dlg-box" role="dialog" aria-modal="true" aria-labelledby="app-dlg-title" onclick="event.stopPropagation()">
+    <div class="app-dlg-title" id="app-dlg-title">알림</div>
+    <div class="app-dlg-msg" id="app-dlg-msg"></div>
+    <button type="button" class="app-dlg-ok" onclick="closeAppDlg()">확인</button>
+  </div>
+</div>
+
+<!-- ── 첫 실행 권장 사양 안내 팝업 ────────────────────────────────── -->
+<div class="spec-dlg-bg" id="spec-dlg" onclick="if(event.target===this)closeSpecDlg()">
+  <div class="spec-dlg-box" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+    <div class="spec-dlg-h">💻 권장 사양 안내</div>
+    <div class="spec-dlg-sub">
+      PC 사양에 맞는 파일 크기를 확인하세요. 파일이 크면 클수록 CPU·RAM·GPU가 많이 필요합니다.
+    </div>
+
+    <div class="spec-grid">
+      <!-- 문서용 노트북 -->
+      <div class="spec-card">
+        <div class="spec-badge">문서용 노트북</div>
+        <div class="spec-cap">2 GB<small>까지</small></div>
+        <div class="spec-name">간단 스캔 · 가벼운 뷰</div>
+        <div class="spec-rows">
+          <div class="spec-row"><span class="k">CPU</span><span class="v">i5-1235U / Ryzen 5 7530U</span></div>
+          <div class="spec-row"><span class="k">GPU</span><span class="v">내장 (Iris Xe / Radeon)</span></div>
+          <div class="spec-row"><span class="k">RAM</span><span class="v">8 GB</span></div>
+          <div class="spec-row"><span class="k">포인트</span><span class="v">~ 100만</span></div>
+        </div>
+      </div>
+
+      <!-- 일반 데스크탑 -->
+      <div class="spec-card mid">
+        <div class="spec-badge">🔷 일반 데스크탑</div>
+        <div class="spec-cap">16 GB<small>까지</small></div>
+        <div class="spec-name">중급 3D 스캔 · 베이크</div>
+        <div class="spec-rows">
+          <div class="spec-row"><span class="k">CPU</span><span class="v">i5-13400F / Ryzen 5 7600</span></div>
+          <div class="spec-row"><span class="k">GPU</span><span class="v">RTX 4060 / RX 7600</span></div>
+          <div class="spec-row"><span class="k">RAM</span><span class="v">16–32 GB</span></div>
+          <div class="spec-row"><span class="k">포인트</span><span class="v">~ 500만</span></div>
+        </div>
+      </div>
+
+      <!-- 고사양 컴퓨터 -->
+      <div class="spec-card hi">
+        <div class="spec-badge">⭐ 고사양 PC</div>
+        <div class="spec-cap">32 GB<small>까지</small></div>
+        <div class="spec-name">대용량 LiDAR · Gaussian</div>
+        <div class="spec-rows">
+          <div class="spec-row"><span class="k">CPU</span><span class="v">i9-14900K / Ryzen 9 7950X</span></div>
+          <div class="spec-row"><span class="k">GPU</span><span class="v">RTX 4090 / RX 7900 XTX</span></div>
+          <div class="spec-row"><span class="k">RAM</span><span class="v">64 GB+</span></div>
+          <div class="spec-row"><span class="k">포인트</span><span class="v">1000만+</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec-note">
+      ⚠️ <b>브라우저/WebView 업로드는 2 GB까지만 안정적</b>입니다.<br>
+      그 이상은 PC RAM이 충분해도 WebView 메모리 한계로 앱이 멈출 수 있습니다.<br>
+      실제 처리 한도는 <b>본인 PC RAM의 30~40%</b>가 안전선입니다.
+    </div>
+
+    <div class="spec-dlg-foot">
+      <label class="spec-check">
+        <input type="checkbox" id="spec-hide"> 다시 보지 않기
+      </label>
+      <button type="button" class="spec-ok" onclick="closeSpecDlg()">시작하기</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ PAGE 2 ══════════════════════════════════════════════════════════ -->
+<div id="page2" style="display:none">
+  <div class="p2-wrap">
+
+    <!-- 좌: 컨트롤 패널 -->
+    <div>
+
+      <!-- PLY 드롭 -->
+      <div class="p2-panel">
+        <div class="p2-title">📂 PLY 파일 로드</div>
+        <div class="p2-drop" id="p2-drop">
+          <div class="pd-icon">☁️</div>
+          <div style="font-size:13px;font-weight:600">PLY 파일을 여기에 드롭</div>
+          <div class="pd-hint">.ply (Point Cloud · Gaussian Splatting)</div>
+          <div class="pd-name" id="p2-fname"></div>
+        </div>
+        <input type="file" id="p2-finput" accept=".ply" style="display:none">
+      </div>
+
+      <!-- 뷰어 보정 -->
+      <div class="p2-panel">
+        <div class="p2-title">🔧 뷰어 보정</div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;font-size:12px;color:#C0C0C0">
+          <input type="checkbox" id="p2-zup-toggle" onchange="applyP2ZUp()"
+            style="width:15px;height:15px;accent-color:#A0A0A0;cursor:pointer">
+          Z-up → Y-up 변환 (Blender·스캐너 파일)
+        </label>
+        <div style="font-size:10px;color:#666;margin-top:6px;line-height:1.5">
+          포인트 클라우드가 옆으로 쓰러져 보이면 체크하세요.<br>
+          Z축이 위인 파일(Blender·LIDAR)을 Y-up으로 바로 세웁니다.
+        </div>
+      </div>
+
+      <!-- 콜라이더 배치 -->
+      <div class="p2-panel">
+        <div class="p2-title">📦 콜라이더 배치</div>
+
+        <!-- 수동 패널 (항상 표시) -->
+        <div id="p2-manual-panel">
+          <div class="ai-hint" style="margin-bottom:10px">뷰어에서 <b>좌클릭 드래그</b>로 박스 영역을 그립니다.<br>Alt+LMB = 회전 &nbsp;·&nbsp; 스크롤 = 줌</div>
+
+          <!-- 자동 콜라이더 — 2가지 모드 -->
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <button class="p2-btn" id="auto-box-btn" disabled onclick="autoBoxCollider()"
+              style="flex:1;background:#2A3A2A;color:#86EFAC;border:1px solid #4A7A4A;
+                     font-size:11px;padding:8px 4px;line-height:1.3">
+              ⚡ 박스<br><span style="font-size:10px;opacity:.8">AABB 1개</span>
+            </button>
+            <button class="p2-btn" id="auto-mesh-btn" disabled onclick="autoMeshCollider()"
+              style="flex:1;background:#1A2A3A;color:#93C5FD;border:1px solid #2A4A6A;
+                     font-size:11px;padding:8px 4px;line-height:1.3">
+              🔶 메쉬<br><span style="font-size:10px;opacity:.8">Poisson+ICP</span>
+            </button>
+          </div>
+
+          <!-- 메쉬 콜라이더 정밀 옵션 -->
+          <details id="mc-opts" style="margin-bottom:10px;background:#F6F6F6;border:1px solid #E0E0E0;border-radius:6px;padding:6px 8px">
+            <summary style="cursor:pointer;font-size:11px;color:#606060;user-select:none">
+              ⚙️ 메쉬 콜라이더 정밀 옵션
+            </summary>
+            <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px 8px;font-size:11px;color:#555">
+              <label style="display:flex;flex-direction:column;gap:2px">
+                <span>재구성 방식</span>
+                <select id="mc-method" style="font-size:11px;padding:3px 4px;border:1px solid #D8D8D8;border-radius:4px;background:#fff">
+                  <option value="poisson" selected>Poisson (매끄럽)</option>
+                  <option value="bpa">BPA (거친 표면)</option>
+                </select>
+              </label>
+              <label style="display:flex;flex-direction:column;gap:2px">
+                <span>디테일 깊이 <span id="mc-depth-val" style="color:#888">8</span></span>
+                <input type="range" id="mc-depth" min="6" max="10" step="1" value="8"
+                  oninput="$('mc-depth-val').textContent=this.value"
+                  style="accent-color:#555">
+              </label>
+              <label style="display:flex;flex-direction:column;gap:2px">
+                <span>목표 삼각형 <span id="mc-target-val" style="color:#888">4000</span></span>
+                <input type="range" id="mc-target" min="500" max="20000" step="500" value="4000"
+                  oninput="$('mc-target-val').textContent=this.value"
+                  style="accent-color:#555">
+              </label>
+              <label style="display:flex;flex-direction:column;gap:2px">
+                <span>ICP 정합 <span id="mc-snap-val" style="color:#888">3</span></span>
+                <input type="range" id="mc-snap" min="0" max="6" step="1" value="3"
+                  oninput="$('mc-snap-val').textContent=this.value"
+                  style="accent-color:#555">
+              </label>
+              <label style="display:flex;flex-direction:column;gap:2px">
+                <span>긴 엣지 프루닝 <span id="mc-prune-val" style="color:#888">4.0×</span></span>
+                <input type="range" id="mc-prune" min="2.0" max="6.0" step="0.5" value="4.0"
+                  oninput="$('mc-prune-val').textContent=parseFloat(this.value).toFixed(1)+'×'"
+                  style="accent-color:#555">
+              </label>
+              <label style="display:flex;flex-direction:column;gap:2px">
+                <span>오목/구멍 트림 <span id="mc-trim-val" style="color:#888">8%</span></span>
+                <input type="range" id="mc-trim" min="0" max="30" step="1" value="8"
+                  oninput="$('mc-trim-val').textContent=this.value+'%'"
+                  style="accent-color:#555">
+              </label>
+              <label style="grid-column:1/-1;display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none">
+                <input type="checkbox" id="mc-convex" style="accent-color:#555">
+                <span>ACD 분해 (Unity 동적 rigidbody용 · 여러 Convex 파트)</span>
+              </label>
+              <label style="grid-column:1/-1;display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none">
+                <input type="checkbox" id="mc-keep-frag" style="accent-color:#555">
+                <span>작은 파편 유지 (기본: 가장 큰 덩어리만)</span>
+              </label>
+              <label style="grid-column:1/-1;display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;border-top:1px solid #333;padding-top:6px;margin-top:2px">
+                <input type="checkbox" id="mc-im" style="accent-color:#555">
+                <span>🔷 Instant Meshes 리토폴로지 <span style="opacity:.7">(토폴로지 균일화)</span></span>
+              </label>
+              <label style="display:flex;flex-direction:column;gap:2px;grid-column:1/-1" id="mc-im-row">
+                <span>IM 목표 면 수 <span id="mc-im-faces-val" style="color:#888">2K</span></span>
+                <input type="range" id="mc-im-faces" min="500" max="8000" step="100" value="2000"
+                  oninput="$('mc-im-faces-val').textContent = (+this.value>=1000 ? (+this.value/1000).toFixed(1)+'K' : this.value)"
+                  style="accent-color:#555">
+              </label>
+              <div style="grid-column:1/-1;font-size:10px;color:#888;line-height:1.5;margin-top:2px">
+                💡 공간을 가로지르는 "실" 삼각형이 보이면 <b>프루닝 ↓</b> (3.0~3.5)<br>
+                💡 오목 영역(눈구멍·비강)이 막히면 <b>트림 ↑</b> (12~20%)<br>
+                💡 IM: 정확도는 동일, 면 배치만 균일해짐. Unity는 어차피 tri로 변환하니 선택.
+              </div>
+            </div>
+          </details>
+
+          <div style="font-size:10px;color:#666;margin-bottom:10px;line-height:1.5">
+            박스: 바운딩박스 단순 AABB · 메쉬: 포인트 표면을 따라가는 정밀 메쉬(오목 영역 포함).
+          </div>
+
+          <button class="p2-btn" id="add-box-btn" disabled onclick="startBoxPlace()">
+            📦 박스 드래그 배치
+          </button>
+          <div class="box-form" id="box-form">
+            <div style="font-size:11px;font-weight:700;color:#606060;margin-bottom:4px">
+              ✏️ 드래그로 정육면체 배치
+            </div>
+            <div style="font-size:10px;color:#A0A0A0;margin-bottom:8px">드래그 크기가 X·Y·Z 모두 동일하게 적용됩니다</div>
+            <div style="font-size:10px;color:#A0A0A0;margin-bottom:4px">라벨</div>
+            <input type="text" id="bf-label" value="Object"
+              style="width:100%;background:#fff;border:1px solid #D8D8D8;border-radius:4px;
+                     padding:5px 8px;font-size:12px;box-sizing:border-box;margin-bottom:8px">
+            <button class="p2-btn sec" onclick="cancelBoxPlace()" style="font-size:12px;padding:7px;width:100%">
+              ✕ 취소
+            </button>
+          </div>
+          <div style="display:flex;gap:6px;margin-top:8px">
+            <button class="p2-btn sec" onclick="undoBox()" style="flex:1;font-size:12px;padding:8px">↩ 실행취소</button>
+            <button class="p2-btn sec" onclick="clearBoxes()" style="flex:1;font-size:12px;padding:8px">🗑 초기화</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 자동 처리 결과 배너 (Page 1에서 자동파이프라인 돌렸을 때) -->
+      <div id="p2-auto-info" class="p2-panel" style="display:none;background:linear-gradient(135deg,#1A2A3A,#101F33);border-color:#2A4A6A">
+        <div class="p2-title" style="color:#93C5FD">🚀 자동 처리 결과</div>
+        <div style="font-size:11px;color:#93C5FD;line-height:1.5;margin-bottom:8px">
+          Page 1 자동 파이프라인에서 생성된 <b>메쉬 콜라이더</b>가 세션에 있습니다.<br>
+          Unity JSON으로 바로 다운로드 가능.
+        </div>
+        <button class="p2-btn" onclick="p2DownloadAutoCollider()"
+          style="width:100%;background:#1E4FAA;color:#fff;padding:8px;font-size:12px">
+          💾 자동 콜라이더 JSON 다운로드
+        </button>
+      </div>
+
+      <!-- 콜라이더 목록 -->
+      <div class="p2-panel">
+        <div class="p2-title">
+          📦 콜라이더 목록
+          <span id="box-count" style="font-weight:400;color:#C0C0C0;text-transform:none;letter-spacing:0">
+            (0개)
+          </span>
+        </div>
+        <div id="col-list"><div class="ai-hint">콜라이더가 없습니다</div></div>
+        <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">
+          <button class="p2-btn" id="export-btn" disabled onclick="exportColliders()">
+            💾 Unity JSON 내보내기
+          </button>
+          <button class="p2-btn" id="export-unitypkg-btn" disabled onclick="exportUnityPackage()"
+            style="background:#2A4A2A;color:#86EFAC;border:1px solid #4A7A4A">
+            📦 Unity Package (.unitypackage)
+          </button>
+          <div style="font-size:10px;color:#808080;line-height:1.4">
+            JSON: 콜라이더 데이터만 · Package: PLY+JSON+프리팹+C# 스크립트 완성본
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /left col -->
+
+    <!-- 우: 3D 뷰어 -->
+    <div>
+      <div class="viewer-wrap">
+        <canvas id="three-canvas"></canvas>
+        <div class="viewer-overlay">
+          <div class="vbadge" id="pts-badge">포인트 없음</div>
+          <button class="vtoggle" id="v-toggle" onclick="toggleViewer()">⏸ ON</button>
+        </div>
+        <div class="viewer-hint" id="viewer-hint">Alt+LMB = 회전 &nbsp;·&nbsp; Alt+MMB = 패닝 &nbsp;·&nbsp; 스크롤 = 줌 &nbsp;·&nbsp; F = 전체보기</div>
+        <canvas id="p2-gizmo" class="scene-gizmo"></canvas>
+        <!-- 로딩 오버레이 — 메쉬 콜라이더 생성 중 "응답 없음" 대신 표시 -->
+        <div id="p2-viewer-loading" class="viewer-loading">
+          <div class="vl-card">
+            <div class="vl-spinner"></div>
+            <div class="vl-title" id="p2-loading-title">로딩중...</div>
+            <div class="vl-sub" id="p2-loading-sub">처리에 수 초 ~ 수십 초 걸릴 수 있습니다</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══ PAGE 3 ══════════════════════════════════════════════════════════ -->
+<div id="page3" style="display:none">
+  <div class="p3-wrap">
+
+    <!-- 좌: 컨트롤 패널 -->
+    <div>
+
+      <!-- 파일 드롭 -->
+      <div class="p2-panel">
+        <div class="p2-title">📂 포인트 클라우드 로드</div>
+        <div class="p2-drop" id="p3-drop">
+          <div class="pd-icon">☁️</div>
+          <div style="font-size:13px;font-weight:600">파일을 여기에 드롭하거나 클릭</div>
+          <div class="pd-hint">.ply .xyz .pts .pcd .csv .obj .las</div>
+          <div class="pd-name" id="p3-fname"></div>
+        </div>
+        <input type="file" id="p3-finput"
+          accept=".ply,.xyz,.pts,.pcd,.las,.laz,.obj,.csv,.txt,.ptx,.splat,.ksplat"
+          style="display:none">
+      </div>
+
+      <!-- 변환 설정 — 프리셋 카드 -->
+      <div class="p2-panel">
+        <div class="p2-title">⚙️ 변환 품질</div>
+
+        <!-- 프리셋 카드 3종 — LOD1/LOD2/LOD3 (한 단계 땡김) -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
+          <button type="button" class="p3-preset-card" id="preset-fast" onclick="p3SetPreset('fast')">
+            <div style="font-size:16px;margin-bottom:4px;font-weight:800;letter-spacing:.02em">LOD1</div>
+            <div style="font-size:11px;color:#A0A0A0;margin-top:2px;line-height:1.4">완전 로우<br>최대 V 5K</div>
+          </button>
+          <button type="button" class="p3-preset-card" id="preset-balanced" onclick="p3SetPreset('balanced')">
+            <div style="font-size:16px;margin-bottom:4px;font-weight:800;letter-spacing:.02em">LOD2</div>
+            <div style="font-size:11px;color:#A0A0A0;margin-top:2px;line-height:1.4">중간<br>최대 V 15K</div>
+          </button>
+          <button type="button" class="p3-preset-card active" id="preset-quality" onclick="p3SetPreset('quality')">
+            <div style="font-size:16px;margin-bottom:4px;font-weight:800;letter-spacing:.02em">LOD3 <span style="font-size:9px;color:#888;font-weight:500">(권장)</span></div>
+            <div style="font-size:11px;color:#A0A0A0;margin-top:2px;line-height:1.4">고품질<br>최대 V 25K · ICP</div>
+          </button>
+        </div>
+
+        <!-- 🟢 스무스 / 🔷 하드 — 표면 모드 택1 (필수) ─────────────────── -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+          <label class="p3-mode-card" id="p3-mode-smooth-lbl" data-mode="smooth" onclick="p3OnSurfaceModeChange('smooth')">
+            <input type="checkbox" id="p3-mode-smooth" style="display:none">
+            <div class="p3-mode-ttl">🟢 스무스</div>
+            <div class="p3-mode-sub">유기체 · 인물 · 자연물<br>(Poisson 기반)</div>
+          </label>
+          <label class="p3-mode-card" id="p3-mode-hard-lbl" data-mode="hard" onclick="p3OnSurfaceModeChange('hard')">
+            <input type="checkbox" id="p3-mode-hard" style="display:none">
+            <div class="p3-mode-ttl">🔷 하드</div>
+            <div class="p3-mode-sub">건물 · 설비 · 로봇<br>(Alpha + 평면 스냅)</div>
+          </label>
+        </div>
+        <div id="p3-mode-warn" style="font-size:10px;color:#F87171;margin-bottom:6px">
+          ⚠️ 스무스 또는 하드 중 하나를 선택해야 메쉬 변환이 실행됩니다
+        </div>
+
+        <!-- 실행 버튼 -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <button type="button" class="p2-btn" id="p3-run-btn" disabled onclick="runP3Pipeline()"
+            style="flex:1">
+            ▶ 메쉬 변환 실행
+          </button>
+        </div>
+
+        <!-- 미러 옵션 — 축·기준 선택 가능 -->
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:11px;color:#888">
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none">
+            <input type="checkbox" id="p3-mirror"
+              style="width:13px;height:13px;accent-color:#888;cursor:pointer"
+              onchange="p3OnMirrorChange()">
+            🔀 미러
+          </label>
+          <select id="p3-mirror-axis" title="반전 축"
+            style="background:#1A1A1A;border:1px solid #333;border-radius:4px;color:#E8E8E8;font-size:11px;padding:2px 4px">
+            <option value="x">X축 반전</option>
+            <option value="y">Y축 반전</option>
+            <option value="z">Z축 반전</option>
+          </select>
+          <select id="p3-mirror-center" title="미러 기준점"
+            style="background:#1A1A1A;border:1px solid #333;border-radius:4px;color:#E8E8E8;font-size:11px;padding:2px 4px">
+            <option value="centroid" selected>기준: 중심점</option>
+            <option value="bbox">기준: BBox</option>
+            <option value="origin">기준: 원점(0)</option>
+          </select>
+        </div>
+        <!-- 초기화 버튼 -->
+        <button type="button" class="p2-btn sec" id="p3-reset-btn" onclick="p3Reset()"
+          style="width:100%;font-size:12px;padding:8px">
+          🗑 초기화
+        </button>
+
+        <!-- 고급 설정 아코디언 -->
+        <details style="margin-top:14px" id="p3-advanced-details">
+          <summary style="font-size:11px;font-weight:700;color:#888;cursor:pointer;
+            padding:6px 0;border-top:1px solid #EBEBEB;list-style:none;display:flex;
+            align-items:center;gap:4px;user-select:none">
+            <span id="p3-adv-arrow">▶</span> 고급 설정
+          </summary>
+          <div style="margin-top:10px">
+
+            <div class="p2-label" style="margin:0 0 6px">표면 재구성 알고리즘</div>
+            <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
+              <label class="p3-toggle-row" style="margin:0">
+                <input type="radio" name="p3-algo" id="p3-algo-mc" value="mc" checked onchange="p3OnAlgoChange()">
+                Marching Cubes <span style="font-size:10px;color:#A0A0A0">(splat)</span>
+              </label>
+              <label class="p3-toggle-row" style="margin:0">
+                <input type="radio" name="p3-algo" id="p3-algo-sdf" value="sdf" onchange="p3OnAlgoChange()">
+                SDF Marching Cubes <span style="font-size:10px;color:#A0A0A0">(거리장, 정밀)</span>
+              </label>
+              <label class="p3-toggle-row" style="margin:0">
+                <input type="radio" name="p3-algo" id="p3-algo-poisson" value="poisson" onchange="p3OnAlgoChange()">
+                Poisson <span style="font-size:10px;color:#A0A0A0">(권장 · 매끄럽)</span>
+              </label>
+              <label class="p3-toggle-row" style="margin:0">
+                <input type="radio" name="p3-algo" id="p3-algo-bpa" value="bpa" onchange="p3OnAlgoChange()">
+                Ball-Pivoting (BPA)
+              </label>
+            </div>
+            <div id="p3-bpa-hint" style="display:none;font-size:10px;color:#92400E;background:#FFFBEB;
+              border:1px solid #FDE68A;border-radius:6px;padding:8px 10px;margin-bottom:10px;line-height:1.5">
+              BPA는 법선이 있는 구조화 스캔에서 유리합니다. 법선이 없으면 자동 추정합니다.
+            </div>
+            <div id="p3-poisson-hint" style="display:none;font-size:10px;color:#1E40AF;background:#EFF6FF;
+              border:1px solid #BFDBFE;border-radius:6px;padding:8px 10px;margin-bottom:10px;line-height:1.5">
+              Poisson은 가장 정확한 방식. Watertight 보장 · depth ↑ 디테일↑, 느림.
+            </div>
+
+            <!-- Poisson depth 패널 -->
+            <div id="p3-poisson-panel" style="display:none">
+              <div class="p2-label" style="margin:10px 0 4px">Poisson 옥트리 깊이</div>
+              <div class="p3-slider-row">
+                <input type="range" id="p3-poisson-depth" min="6" max="11" step="1" value="9">
+                <span class="p3-slider-val" id="p3-poisson-depth-val">9</span>
+              </div>
+              <div style="font-size:10px;color:#A0A0A0;margin-bottom:8px">9=기본, 10=고해상도, 11=초고해상도(느림)</div>
+            </div>
+
+            <!-- ICP 정합 스냅 -->
+            <div class="p3-toggle-row" style="margin-top:10px">
+              <input type="checkbox" id="p3-icp">
+              <span>🎯 ICP 정합 스냅 (정확도↑)</span>
+            </div>
+            <div class="p3-slider-row" id="p3-icp-row" style="display:none">
+              <span style="font-size:11px;color:#606060;width:48px">반복:</span>
+              <input type="range" id="p3-icp-iter" min="1" max="6" step="1" value="3">
+              <span class="p3-slider-val" id="p3-icp-iter-val">3</span>
+            </div>
+            <div style="font-size:10px;color:#A0A0A0;margin:2px 0 10px 0">
+              생성된 메쉬를 원본 포인트 쪽으로 당겨 정합. 표면 정합도 크게 향상.
+            </div>
+
+            <!-- 노이즈 제거 -->
+            <div class="p3-toggle-row">
+              <input type="checkbox" id="p3-denoise" checked>
+              <span>노이즈 제거</span>
+            </div>
+            <div class="p3-slider-row" id="p3-denoise-row">
+              <span style="font-size:11px;color:#606060;width:56px">강도:</span>
+              <input type="range" id="p3-denoise-k" min="1" max="4" step="1" value="2">
+              <span class="p3-slider-val" id="p3-denoise-k-val">2.0σ</span>
+            </div>
+
+            <div id="p3-mc-panel">
+              <div class="p2-label" style="margin:10px 0 4px">MC 해상도</div>
+              <div class="p3-slider-row">
+                <input type="range" id="p3-mc-res" min="30" max="80" step="5" value="50">
+                <span class="p3-slider-val" id="p3-mc-res-val">50</span>
+              </div>
+              <div style="font-size:10px;color:#A0A0A0;margin-bottom:8px">높을수록 디테일↑ (50 권장)</div>
+            </div>
+
+            <div id="p3-bpa-panel" style="display:none">
+              <div class="p2-label" style="margin:10px 0 4px">BPA 반경 배율</div>
+              <div class="p3-slider-row">
+                <input type="range" id="p3-bpa-scale" min="0.3" max="2.5" step="0.1" value="1">
+                <span class="p3-slider-val" id="p3-bpa-scale-val">1.0</span>
+              </div>
+            </div>
+
+            <!-- 스무딩 -->
+            <div class="p3-toggle-row">
+              <input type="checkbox" id="p3-smooth" checked>
+              <span>스무딩</span>
+            </div>
+            <div class="p3-slider-row" id="p3-smooth-row">
+              <span style="font-size:11px;color:#606060;width:48px">반복:</span>
+              <input type="range" id="p3-smooth-iter" min="1" max="5" step="1" value="2">
+              <span class="p3-slider-val" id="p3-smooth-iter-val">2</span>
+            </div>
+            <div style="display:flex;gap:6px;margin-bottom:8px;font-size:11px;color:#888">
+              <label style="display:flex;align-items:center;gap:4px;cursor:pointer;user-select:none">
+                <input type="radio" name="p3-smooth-type" id="p3-smooth-taubin" value="taubin" checked>
+                ✨ Taubin <span style="opacity:.7">(부피 보존)</span>
+              </label>
+              <label style="display:flex;align-items:center;gap:4px;cursor:pointer;user-select:none">
+                <input type="radio" name="p3-smooth-type" id="p3-smooth-laplacian" value="laplacian">
+                Laplacian <span style="opacity:.7">(수축)</span>
+              </label>
+            </div>
+
+            <!-- 정리(Cleanup) — page 2에서 효과 좋았던 로직 -->
+            <div class="p2-label" style="margin:14px 0 4px">메쉬 정리 (page 2 방식)</div>
+            <div class="p3-toggle-row">
+              <input type="checkbox" id="p3-prune" checked>
+              <span>🧹 긴-엣지 프루닝 <span style="font-size:10px;opacity:.7">(공간 가로지르는 실 제거)</span></span>
+            </div>
+            <div class="p3-slider-row" id="p3-prune-row">
+              <span style="font-size:11px;color:#606060;width:48px">강도:</span>
+              <input type="range" id="p3-prune-ratio" min="2.5" max="6.0" step="0.5" value="4.0">
+              <span class="p3-slider-val" id="p3-prune-ratio-val">4.0×</span>
+            </div>
+            <div class="p3-toggle-row">
+              <input type="checkbox" id="p3-remove-frag" checked>
+              <span>🧩 파편 제거 <span style="font-size:10px;opacity:.7">(작은 컴포넌트 자동 제거)</span></span>
+            </div>
+
+            <!-- 공갈 구멍 자동 메우기 -->
+            <div class="p3-toggle-row">
+              <input type="checkbox" id="p3-fake-hole-fill" checked>
+              <span>🕳 공갈 구멍 자동 메우기 <span style="font-size:10px;opacity:.7">(스캔 부족으로 생긴 가짜 구멍)</span></span>
+            </div>
+
+            <!-- 색상 그룹 쉐이더 (Unity Lambert multi-material) -->
+            <div class="p3-toggle-row" style="margin-top:10px">
+              <input type="checkbox" id="p3-color-groups-on" checked>
+              <span>🎨 색상 그룹 쉐이더 <span style="font-size:10px;opacity:.7">(원본 색 → K개 Lambert material)</span></span>
+            </div>
+            <div class="p3-slider-row" id="p3-color-groups-row">
+              <span style="font-size:11px;color:#606060;width:56px">그룹 수:</span>
+              <input type="range" id="p3-color-groups-k" min="2" max="16" step="1" value="6">
+              <span class="p3-slider-val" id="p3-color-groups-k-val">6</span>
+            </div>
+            <div style="font-size:10px;color:#888;margin-bottom:8px;line-height:1.5">
+              K-means로 메쉬 버텍스 색을 N개 그룹으로 클러스터링 후 각 그룹을<br>
+              <b>별개 Lambert material (MTL)</b>로 내보냄 → Unity에서 쉐이더 자동 분리.
+            </div>
+            <div class="p3-slider-row" id="p3-hole-size-row">
+              <span style="font-size:11px;color:#606060;width:72px">최대 크기:</span>
+              <input type="range" id="p3-fake-hole-size" min="5" max="30" step="1" value="15">
+              <span class="p3-slider-val" id="p3-fake-hole-size-val">15%</span>
+            </div>
+            <div style="font-size:10px;color:#888;margin-bottom:8px;line-height:1.5">
+              구멍이 대각선의 % 이하면 공갈로 판정. 주변에 원본 포인트 있으면 메움.<br>
+              8% 이하인 아주 작은 구멍은 포인트 체크 없이 무조건 메움.
+            </div>
+
+            <!-- Instant Meshes — 진짜 field-aligned quad 리토폴로지 -->
+            <div class="p2-label" style="margin:12px 0 4px">🔷 Instant Meshes 리토폴로지 <span style="font-size:10px;opacity:.7">(100% Quad 토폴로지)</span></div>
+            <div class="p3-toggle-row">
+              <input type="checkbox" id="p3-instant-meshes">
+              <span>활성화 <span style="font-size:10px;opacity:.7">(SIGGRAPH 2015 자동 리토폴)</span></span>
+            </div>
+            <div id="p3-im-opts" style="display:none">
+              <div class="p3-slider-row">
+                <span style="font-size:11px;color:#606060;width:72px">목표 면 수:</span>
+                <input type="range" id="p3-im-faces" min="1000" max="30000" step="500" value="8000">
+                <span class="p3-slider-val" id="p3-im-faces-val">8K</span>
+              </div>
+              <div class="p3-slider-row">
+                <span style="font-size:11px;color:#606060;width:72px">엣지 보존:</span>
+                <input type="range" id="p3-im-crease" min="0" max="90" step="5" value="0">
+                <span class="p3-slider-val" id="p3-im-crease-val">끔</span>
+              </div>
+              <div class="p3-toggle-row" style="margin-top:4px">
+                <input type="checkbox" id="p3-im-pure-quad" checked>
+                <span>순수 Quad 전용 <span style="font-size:10px;opacity:.7">(끄면 quad+tri 혼합)</span></span>
+              </div>
+            </div>
+            <div style="font-size:10px;color:#888;margin-bottom:10px;line-height:1.5">
+              ★ 무작위 Voronoi 대신 <b>완전한 Quad 격자 토폴로지</b>. Maya에서 리토폴로지한 것처럼 정갈함.<br>
+              엣지 보존(0~90°): 날카로운 모서리 살려야 하면 30~60°, 부드럽게 하려면 0.
+            </div>
+
+            <!-- 축-정렬 복셀 리메시 — IM 대안 -->
+            <div class="p2-label" style="margin:12px 0 4px">⬜ 축-정렬 복셀 리메시 <span style="font-size:10px;opacity:.7">(단순 격자, IM 대체)</span></div>
+            <div class="p3-toggle-row">
+              <input type="checkbox" id="p3-voxel-remesh">
+              <span>활성화 <span style="font-size:10px;opacity:.7">(무작위 Voronoi → XYZ 격자)</span></span>
+            </div>
+            <div class="p3-slider-row" id="p3-voxel-res-row" style="display:none">
+              <span style="font-size:11px;color:#606060;width:56px">해상도:</span>
+              <input type="range" id="p3-voxel-res" min="25" max="120" step="5" value="60">
+              <span class="p3-slider-val" id="p3-voxel-res-val">60</span>
+            </div>
+            <div style="font-size:10px;color:#888;margin-bottom:10px;line-height:1.5">
+              IM 없이 간단히 격자 만들 때. IM보다 품질 낮음.
+            </div>
+
+            <!-- 목표 삼각형 수 — Poisson 폭주 억제 -->
+            <div class="p2-label" style="margin:12px 0 4px">목표 삼각형 수 <span style="font-size:10px;opacity:.7">(0=간단화 안함)</span></div>
+            <div class="p3-slider-row">
+              <input type="range" id="p3-target-tris" min="0" max="50000" step="1000" value="10000">
+              <span class="p3-slider-val" id="p3-target-tris-val">10K</span>
+            </div>
+            <div style="font-size:10px;color:#888;margin-bottom:8px;line-height:1.5">
+              Poisson/BPA가 너무 조밀할 때 Quadric Decimation으로 줄임. Maya 로드 가벼워짐.
+            </div>
+
+            <!-- ── 메쉬 품질 옵션 ─────────────────────────────── -->
+            <div class="p2-label" style="margin:14px 0 4px">메쉬 품질</div>
+            <div class="p3-toggle-row" data-tip="OBJ에 vn(vertex normals) 포함 → Maya 임포트 시 자동 smooth">
+              <input type="checkbox" id="p3-smooth-normals" checked>
+              <span>🎨 스무드 노멀 <span style="font-size:10px;opacity:.7">(Maya Soften Edge All)</span></span>
+            </div>
+            <div class="p3-toggle-row" data-tip="같은 좌표에 있는 중복 버텍스를 합침 — decimation 후 면이 끊겨 보이는 현상 방지">
+              <input type="checkbox" id="p3-merge-verts" checked>
+              <span>🔗 중복 버텍스 병합 <span style="font-size:10px;opacity:.7">(끊어진 면 방지)</span></span>
+            </div>
+            <div class="p3-toggle-row" data-tip="face winding을 바깥쪽으로 통일 — 뒤집힌 노멀 수정">
+              <input type="checkbox" id="p3-orient-normals" checked>
+              <span>🧭 노멀 일관성 재보정</span>
+            </div>
+            <div class="p3-toggle-row" data-tip="삼각형 크기를 균일하게 — 시간 오래 걸림. 대신 IM 리토폴로지가 더 효과적">
+              <input type="checkbox" id="p3-uniform-remesh">
+              <span>◇ 면 균일화 <span style="font-size:10px;opacity:.7">(isotropic remesh, 느림)</span></span>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <!-- 파이프라인 단계 — 내부 처리용 (UI 숨김, DOM은 유지) -->
+      <div style="display:none" aria-hidden="true">
+        <div id="pipe-step-load"    class="pipe-step"><span class="pipe-icon">📂</span><span class="pipe-label">파일 로드</span><span class="pipe-status" id="ps-load">대기</span></div>
+        <div id="pipe-step-denoise" class="pipe-step"><span class="pipe-icon">🧹</span><span class="pipe-label">노이즈 제거</span><span class="pipe-status" id="ps-denoise">대기</span></div>
+        <div id="pipe-step-mc"      class="pipe-step"><span class="pipe-icon">⬡</span><span class="pipe-label">표면 재구성</span><span class="pipe-status" id="ps-mc">대기</span></div>
+        <div id="pipe-step-validate" class="pipe-step"><span class="pipe-icon">🔍</span><span class="pipe-label">메쉬 검증</span><span class="pipe-status" id="ps-validate">대기</span></div>
+        <div id="pipe-step-repair"  class="pipe-step"><span class="pipe-icon">🔧</span><span class="pipe-label">메쉬 정리 + 스무딩</span><span class="pipe-status" id="ps-repair">대기</span></div>
+        <div id="pipe-step-export"  class="pipe-step"><span class="pipe-icon">💾</span><span class="pipe-label">뷰어 / OBJ 준비</span><span class="pipe-status" id="ps-export">대기</span></div>
+      </div>
+
+      <!-- ── 결과 저장 (왼쪽 패널 하단) ──────────────────────────── -->
+      <div class="p2-panel" style="background:#FAFAFA">
+        <div class="p2-title">💾 결과 저장</div>
+
+        <!-- 메쉬 통계 -->
+        <div id="p3-mesh-stats" style="display:none;margin-bottom:8px">
+          <span class="mesh-stat" id="ms-verts">-</span>
+          <span class="mesh-stat" id="ms-faces">-</span>
+          <span class="mesh-stat" id="ms-wire">-</span>
+        </div>
+
+        <!-- OBJ / FBX / GLB 저장 버튼 -->
+        <div style="display:flex;gap:4px;margin-bottom:6px">
+          <button class="p2-btn" id="p3-export-smooth" disabled onclick="p3ExportOBJ()"
+            style="flex:1;font-size:11px;padding:9px 2px">
+            💾 OBJ
+          </button>
+          <button class="p2-btn" id="p3-export-fbx" disabled onclick="p3ExportFBX()"
+            style="flex:1;font-size:11px;padding:9px 2px;background:#1E4FAA;color:#fff">
+            💾 FBX
+          </button>
+          <button class="p2-btn" id="p3-export-glb" disabled onclick="p3ExportGLB()"
+            style="flex:1;font-size:11px;padding:9px 2px;background:#2A7A4A;color:#fff">
+            💾 GLB
+          </button>
+        </div>
+        <div style="font-size:9px;color:#888;text-align:center;margin-bottom:6px;line-height:1.5">
+          <span style="color:#6FA06F">OBJ: 범용 (모든 툴)</span> ·
+          <span style="color:#8B9CDB">GLB: Blender ✓ / Unity ✓(glTFast)</span> ·
+          <span style="color:#C0A060">FBX: Blender ✓ · Unity/Maya ✓ (Blender 설치 시 자동)</span>
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:10px">
+          <button class="vtoggle off" id="p3-wire-btn2" onclick="toggleP3Wire()"
+            style="flex:1;font-size:11px;padding:7px;border-radius:6px;border:1px solid #CCC;
+                   background:#F0F0F0;color:#606060;cursor:pointer">
+            ◻ 와이어
+          </button>
+          <button class="vtoggle off" id="p3-color-toggle" onclick="p3ToggleColor()"
+            style="flex:1;font-size:11px;padding:7px;border-radius:6px;border:1px solid #CCC;
+                   background:#F0F0F0;color:#606060;cursor:pointer">
+            🎨 색상
+          </button>
+        </div>
+
+        <!-- OBJ 드롭 (외부 OBJ 불러오기) -->
+        <div id="p3-obj-drop" style="border:2px dashed #D0D0D0;border-radius:8px;padding:10px;
+             text-align:center;cursor:pointer;transition:.2s;background:#FAFAFA;margin-bottom:8px">
+          <div style="font-size:14px;margin-bottom:2px">📦</div>
+          <div style="font-size:11px;font-weight:600;color:#808080">OBJ 파일 불러오기</div>
+          <div style="font-size:10px;color:#AAAAAA;margin-top:2px">드롭 또는 클릭</div>
+        </div>
+        <input type="file" id="p3-obj-finput" accept=".obj" style="display:none">
+
+        <!-- 다음 단계 가이드 아코디언 -->
+        <details style="margin-top:4px">
+          <summary style="font-size:11px;font-weight:700;color:#888;cursor:pointer;
+            padding:6px 0;border-top:1px solid #EBEBEB;list-style:none;display:flex;
+            align-items:center;gap:4px;user-select:none">
+            ▶ 다음 단계 가이드 (Instant Meshes · Blender)
+          </summary>
+          <div style="margin-top:10px">
+            <div class="im-panel">
+              <div class="im-title">🔷 Instant Meshes (Quad Retopo)</div>
+              <div style="font-size:11px;color:#1D4ED8;font-weight:700;margin-bottom:4px">🎯 Target: 6,000~9,000 V</div>
+              <div style="font-size:10px;color:#374151;line-height:1.9">
+                <b>Orientation:</b> Auto (Principal Curvature)<br>
+                <b>Position Field:</b> Solve 반드시 실행<br>
+                <b>Sharp Features:</b> ON
+              </div>
+              <a href="https://github.com/wjakob/instant-meshes" target="_blank"
+                 style="font-size:10px;color:#1D4ED8;display:block;margin-top:4px">다운로드 (무료)</a>
+            </div>
+            <div class="im-panel" style="margin-top:6px;background:#FDF4FF;border-color:#E9D5FF">
+              <div class="im-title" style="color:#7C3AED">🔧 Blender Decimate</div>
+              <div style="font-size:10px;color:#374151;line-height:1.9">
+                <b>목표:</b> 4,000~10,000 faces<br>
+                <b>순서:</b> Triangulate → Decimate → Shade Auto Smooth
+              </div>
+            </div>
+            <details style="margin-top:8px">
+              <summary style="font-size:10px;font-weight:700;color:#A0A0A0;cursor:pointer;
+                list-style:none;display:flex;align-items:center;gap:4px;user-select:none">
+                ▶ CLI 명령어
+              </summary>
+              <div style="margin-top:6px;position:relative">
+                <div id="p3-cmd-box" style="background:#0F172A;border:1px solid #334155;border-radius:6px;
+                     padding:9px 40px 9px 10px;font-family:Consolas,monospace;font-size:11px;
+                     color:#93C5FD;min-height:36px;word-break:break-all;line-height:1.6">
+                  파일을 먼저 로드하세요
+                </div>
+                <button onclick="p3CopyCmd()" id="p3-copy-btn"
+                  style="position:absolute;top:6px;right:6px;background:#1E3A5F;border:none;
+                         border-radius:4px;color:#93C5FD;font-size:11px;padding:3px 8px;cursor:pointer">
+                  복사
+                </button>
+              </div>
+            </details>
+          </div>
+        </details>
+      </div>
+
+    </div><!-- /left col -->
+
+    <!-- ── 우: 3D 뷰어 + 로그(풀 넓이) ──────────────────────────────── -->
+    <div style="display:flex;flex-direction:column;gap:10px">
+
+      <!-- 3D 뷰어 -->
+      <div class="viewer-wrap" id="p3-viewer-wrap">
+        <canvas id="p3-canvas"></canvas>
+        <div class="viewer-overlay">
+          <div class="vbadge" id="p3-badge">파일을 로드하세요</div>
+          <button class="vtoggle off" id="p3-wire-btn" onclick="toggleP3Wire()">◻ 와이어프레임</button>
+        </div>
+        <div class="viewer-hint" id="p3-viewer-hint">
+          Alt+LMB = 회전 &nbsp;·&nbsp; Alt+MMB = 패닝 &nbsp;·&nbsp; 스크롤 = 줌 &nbsp;·&nbsp; F = 전체보기
+        </div>
+        <canvas id="p3-gizmo" class="scene-gizmo"></canvas>
+        <!-- 메쉬 변환 진행 중 로딩 오버레이 -->
+        <div id="p3-viewer-loading" class="viewer-loading">
+          <div class="vl-card">
+            <div class="vl-spinner"></div>
+            <div class="vl-title" id="p3-loading-title">메쉬 변환 중...</div>
+            <div class="vl-sub" id="p3-loading-sub">포인트 클라우드 → 메쉬 재구성</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 진행 바 -->
+      <div class="p3-prog-bg" style="margin:0"><div class="p3-prog-fill" id="p3-prog"></div></div>
+
+      <!-- 로그 — 풀 넓이 -->
+      <div class="p2-panel" style="background:#1A1A1A;border:1px solid #2A2A2A">
+        <div class="p2-title" style="color:#888;margin-bottom:6px">📋 로그</div>
+        <div class="p3-log" id="p3-log" style="height:220px;width:100%">— 파일을 로드하세요 —
+</div>
+        <!-- 검증 결과 뱃지 -->
+        <div id="p3-val-panel" style="display:none;margin-top:6px;padding:7px 8px;background:#0F172A;border-radius:6px">
+          <div style="font-size:10px;color:#64748B;margin-bottom:5px;font-weight:600;letter-spacing:.5px">GEOMETRY CHECK</div>
+          <div id="p3-val-badges" style="display:flex;flex-wrap:wrap;gap:3px"></div>
+        </div>
+      </div>
+
+    </div><!-- /right col -->
+
+  </div>
+</div>
+
+<!-- ══ PAGE 4 ══ 텍스처 베이크 ═══════════════════════════════════════════ -->
+<div id="page4" style="display:none">
+  <div class="p2-wrap" style="grid-template-columns:320px 1fr 360px">
+
+    <!-- 왼쪽: 입력 -->
+    <div>
+      <div class="p2-panel">
+        <div class="p2-title">📥 입력 파일</div>
+
+        <!-- 튜토리얼 문구 -->
+        <div style="background:#1A2A3A;border:1px solid #2A4A6A;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#93C5FD;line-height:1.6">
+          <div style="font-weight:700;margin-bottom:4px">📝 사용 방법</div>
+          <div style="font-size:11px;color:#C8C8C8">
+            1️⃣ 원본 PLY 드롭 (색 포함)<br>
+            2️⃣ 메쉬 OBJ 드롭 (Page 3에서 만든거)<br>
+            3️⃣ ▶ 생성 → 2D 텍스처 + 3D 뷰<br>
+            4️⃣ 색상/밝기 조절 · 다시 생성
+          </div>
+        </div>
+
+        <!-- PLY 드롭 -->
+        <div class="p2-label" style="margin-bottom:6px">1. 포인트 클라우드 (.ply)</div>
+        <div class="p2-drop" id="p4-ply-drop" style="padding:16px 12px">
+          <div class="pd-icon" style="font-size:22px">☁️</div>
+          <div style="font-size:12px;font-weight:600">PLY 드롭 또는 클릭</div>
+          <div class="pd-name" id="p4-ply-name"></div>
+        </div>
+        <input type="file" id="p4-ply-input" accept=".ply" style="display:none">
+
+        <!-- 메쉬 드롭 — OBJ/FBX/GLB -->
+        <div class="p2-label" style="margin:12px 0 6px">2. 메쉬 (.obj / .fbx / .glb)</div>
+        <div class="p2-drop" id="p4-obj-drop" style="padding:16px 12px">
+          <div class="pd-icon" style="font-size:22px">🔺</div>
+          <div style="font-size:12px;font-weight:600">OBJ · FBX · GLB 드롭</div>
+          <div class="pd-name" id="p4-obj-name"></div>
+        </div>
+        <input type="file" id="p4-obj-input" accept=".obj,.fbx,.glb" style="display:none">
+
+        <!-- 통계 -->
+        <div id="p4-stats" style="display:none;font-size:11px;color:#A0A0A0;margin-top:10px;padding:8px;background:#1A1A1A;border-radius:6px">
+          <div id="p4-stats-text"></div>
+        </div>
+      </div>
+
+      <div class="p2-panel">
+        <div class="p2-title">⚙️ 베이크 설정</div>
+
+        <div class="p2-label" style="margin-bottom:4px">텍스처 해상도</div>
+        <div style="display:flex;gap:4px;margin-bottom:10px">
+          <button class="p2-btn sec p4-size-btn" data-size="512" onclick="p4SetSize(512)" style="flex:1;padding:6px 2px;font-size:11px">512</button>
+          <button class="p2-btn sec p4-size-btn" data-size="1024" onclick="p4SetSize(1024)" style="flex:1;padding:6px 2px;font-size:11px">1K</button>
+          <button class="p2-btn sec p4-size-btn p4-size-active" data-size="2048" onclick="p4SetSize(2048)" style="flex:1;padding:6px 2px;font-size:11px">2K ⭐</button>
+          <button class="p2-btn sec p4-size-btn" data-size="4096" onclick="p4SetSize(4096)" style="flex:1;padding:6px 2px;font-size:11px">4K</button>
+        </div>
+
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#C8C8C8;cursor:pointer;user-select:none;margin-bottom:8px">
+          <input type="checkbox" id="p4-lighting" checked style="accent-color:#888">
+          💡 라이팅 베이크 (실사느낌)
+        </label>
+
+        <div style="font-size:11px;color:#A0A0A0;margin-bottom:4px">AO 강도 <span id="p4-ao-val">0.5</span></div>
+        <input type="range" id="p4-ao" min="0" max="1" step="0.05" value="0.5"
+          style="width:100%;accent-color:#888;margin-bottom:10px"
+          oninput="$('p4-ao-val').textContent=parseFloat(this.value).toFixed(2)">
+
+        <!-- 🌅 HDRI 환경광 (3D 프리뷰 전용) ─────────────────────────────── -->
+        <div style="background:#1A1A1A;border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+            <span style="font-size:12px;color:#C8C8C8;flex:1;font-weight:600">🌅 HDRI 환경광</span>
+            <label style="font-size:10px;color:#909090;cursor:pointer;display:flex;align-items:center;gap:3px;user-select:none">
+              <input type="checkbox" id="p4-hdri-on" checked style="accent-color:#888;width:12px;height:12px"
+                onchange="p4ToggleHDR(this.checked)">
+              <span>켜기</span>
+            </label>
+          </div>
+          <div id="p4-hdri-info" style="font-size:10px;color:#909090;margin-bottom:6px;line-height:1.4">
+            3D 프리뷰에 환경광 적용 (베이크 결과 파일에는 반영 X)
+          </div>
+          <div style="display:flex;gap:4px;margin-bottom:6px">
+            <button class="p2-btn sec" onclick="$('p4-hdri-input').click()"
+              style="flex:1;font-size:11px;padding:6px 4px">📂 HDRI 선택</button>
+            <button class="p2-btn sec" onclick="p4LoadDefaultHDR()"
+              style="flex:1;font-size:11px;padding:6px 4px">🔄 기본값</button>
+          </div>
+          <div style="font-size:10px;color:#A0A0A0;margin-bottom:3px">강도 <span id="p4-hdri-int-val">1.0</span></div>
+          <input type="range" id="p4-hdri-int" min="0" max="3" step="0.1" value="1.0"
+            style="width:100%;accent-color:#888"
+            oninput="$('p4-hdri-int-val').textContent=parseFloat(this.value).toFixed(1); p4SetHDRIntensity(parseFloat(this.value))">
+          <input type="file" id="p4-hdri-input" accept=".hdr" style="display:none">
+        </div>
+
+        <button class="p2-btn" id="p4-run-btn" disabled onclick="p4RunBake()"
+          style="width:100%;background:#1E4FAA;color:#fff;font-weight:700;padding:12px;font-size:14px;margin-bottom:6px">
+          ▶ 텍스처 생성
+        </button>
+        <button class="p2-btn sec" id="p4-regen-btn" disabled onclick="p4RunBake()"
+          style="width:100%;padding:8px;font-size:11px">
+          🎲 다시 생성 (결과가 마음에 안 들면)
+        </button>
+      </div>
+    </div>
+
+    <!-- 중앙: 3D 뷰어 -->
+    <div>
+      <div class="viewer-wrap" style="height:max(520px, calc(100vh - 200px));position:relative">
+        <canvas id="p4-canvas" style="width:100%;height:100%;display:block;cursor:grab"></canvas>
+        <div class="viewer-overlay">
+          <div class="vbadge" id="p4-badge">3D 미리보기</div>
+          <!-- Transform 모드 버튼 -->
+          <div id="p4-tmode-bar" style="display:none;margin-top:6px;background:rgba(30,30,30,.85);border:1px solid var(--border);border-radius:6px;padding:3px;display:flex;gap:2px">
+            <button class="p4-tmode" data-mode="translate" onclick="p4SetTMode('translate')"
+              style="background:#1E4FAA;color:#fff;border:none;border-radius:4px;padding:4px 8px;font-size:10px;cursor:pointer">이동(W)</button>
+            <button class="p4-tmode" data-mode="rotate" onclick="p4SetTMode('rotate')"
+              style="background:#2A2A2A;color:#C0C0C0;border:none;border-radius:4px;padding:4px 8px;font-size:10px;cursor:pointer">회전(E)</button>
+            <button class="p4-tmode" data-mode="scale" onclick="p4SetTMode('scale')"
+              style="background:#2A2A2A;color:#C0C0C0;border:none;border-radius:4px;padding:4px 8px;font-size:10px;cursor:pointer">스케일(R)</button>
+            <button class="p4-tmode" onclick="p4DetachTransform()"
+              style="background:#2A2A2A;color:#C0C0C0;border:none;border-radius:4px;padding:4px 8px;font-size:10px;cursor:pointer">✕ 끄기</button>
+          </div>
+        </div>
+        <div class="viewer-hint">
+          Alt+LMB = 회전 &nbsp;·&nbsp; Alt+MMB = 패닝 &nbsp;·&nbsp; 스크롤 = 줌 &nbsp;·&nbsp; F = 전체보기 &nbsp;·&nbsp; 메쉬 클릭 = 변형 기즈모
+        </div>
+        <!-- 우상단 축 기즈모 (XYZ 방향 표시) -->
+        <canvas id="p4-axis-gizmo" class="scene-gizmo" style="background:rgba(20,20,20,.6);border-radius:50%"></canvas>
+        <div id="p4-viewer-spinner" class="p4-spinner" style="display:none">
+          <div class="p4-spinner-ring"></div>
+          <div class="p4-spinner-msg" id="p4-viewer-spinner-msg">텍스처 베이크 중...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 오른쪽: 2D 텍스처 + 조정 -->
+    <div>
+      <div class="p2-panel">
+        <div class="p2-title">🖼 텍스처 미리보기</div>
+        <div style="background:#0A0A0A;border:1px solid #333;border-radius:8px;padding:4px;position:relative;aspect-ratio:1/1;overflow:hidden">
+          <img id="p4-tex-img" alt="텍스처"
+            style="width:100%;height:100%;object-fit:contain;display:block;image-rendering:auto">
+          <!-- HSV 드래그 중 실시간 프리뷰 (서버 결과와 동일 알고리즘 JS 적용) -->
+          <canvas id="p4-tex-canvas"
+            style="position:absolute;inset:4px;width:calc(100% - 8px);height:calc(100% - 8px);object-fit:contain;display:none;image-rendering:auto;pointer-events:none"></canvas>
+          <div id="p4-tex-placeholder" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#555;font-size:12px">
+            아직 생성 안 됨
+          </div>
+          <div id="p4-tex-spinner" class="p4-spinner" style="display:none">
+            <div class="p4-spinner-ring"></div>
+            <div class="p4-spinner-msg" id="p4-tex-spinner-msg">처리 중...</div>
+          </div>
+        </div>
+        <div id="p4-tex-info" style="font-size:10px;color:#A0A0A0;margin-top:6px;text-align:center"></div>
+      </div>
+
+      <div class="p2-panel">
+        <div class="p2-title">🎨 색상 조정</div>
+        <div style="font-size:11px;color:#A0A0A0;margin-bottom:4px">색조 (Hue) <span id="p4-hue-val" style="color:#C8C8C8">0°</span></div>
+        <input type="range" id="p4-hue" min="-180" max="180" step="1" value="0"
+          style="width:100%;accent-color:#888;margin-bottom:10px"
+          oninput="p4AdjustDebounced()">
+
+        <div style="font-size:11px;color:#A0A0A0;margin-bottom:4px">채도 (Saturation) <span id="p4-sat-val" style="color:#C8C8C8">1.00</span></div>
+        <input type="range" id="p4-sat" min="0" max="2" step="0.05" value="1"
+          style="width:100%;accent-color:#888;margin-bottom:10px"
+          oninput="p4AdjustDebounced()">
+
+        <div style="font-size:11px;color:#A0A0A0;margin-bottom:4px">밝기 (Brightness) <span id="p4-bright-val" style="color:#C8C8C8">1.00</span></div>
+        <input type="range" id="p4-bright" min="0" max="2" step="0.05" value="1"
+          style="width:100%;accent-color:#888;margin-bottom:10px"
+          oninput="p4AdjustDebounced()">
+
+        <button class="p2-btn sec" onclick="p4ResetHSV()" style="width:100%;font-size:11px;padding:7px">
+          🔄 색상 초기화
+        </button>
+      </div>
+
+      <div class="p2-panel">
+        <div class="p2-title">💾 저장</div>
+        <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:6px">
+          <button class="p2-btn" id="p4-save-btn" disabled onclick="p4SaveAll()"
+            style="width:100%;padding:9px;font-size:12px">
+            💾 OBJ + MTL + PNG
+          </button>
+          <button class="p2-btn" id="p4-save-fbx-btn" disabled onclick="p4SaveFBX()"
+            style="width:100%;padding:9px;font-size:12px;background:#1E4FAA;color:#fff">
+            💾 FBX + PNG
+          </button>
+          <button class="p2-btn" id="p4-save-glb-btn" disabled onclick="p4SaveGLB()"
+            style="width:100%;padding:9px;font-size:12px;background:#2A7A4A;color:#fff">
+            💾 GLB (텍스처 임베드)
+          </button>
+        </div>
+        <div style="font-size:10px;color:#888;line-height:1.6">
+          <b style="color:#B8B8B8">호환성 가이드:</b><br>
+          <span style="color:#6FA06F">• OBJ+MTL+PNG</span> — Blender / Unity / Maya / Godot 전부 ✓<br>
+          <span style="color:#8B9CDB">• GLB (단일 파일)</span> — Blender ✓ / Unity ✓ (glTFast 패키지)<br>
+          <span style="color:#6FA06F">• FBX</span> — Blender 설치 시 Unity/Maya 완벽 호환 (자동)
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══ PAGE 5 — 📷 사진 텍스처 투영 ═══════════════════════════════════════ -->
+<div id="page5" style="display:none">
+  <div class="p3-wrap">
+
+    <!-- 좌: 입력 -->
+    <div>
+      <div class="p2-panel">
+        <div class="p2-title">📂 입력 파일</div>
+        <div style="background:#1A2A3A;border:1px solid #2A4A6A;border-radius:8px;padding:10px;margin-bottom:10px;color:#93C5FD;font-size:12px;line-height:1.6">
+          <div style="font-weight:700;margin-bottom:4px">📝 사용 방법</div>
+          <span style="display:inline-block;width:18px;height:18px;background:#1E4FAA;color:#fff;border-radius:4px;text-align:center;line-height:18px;font-weight:700;font-size:10px">1</span> 메쉬 드롭 (.obj / .fbx / .glb)<br>
+          <span style="display:inline-block;width:18px;height:18px;background:#1E4FAA;color:#fff;border-radius:4px;text-align:center;line-height:18px;font-weight:700;font-size:10px">2</span> 사진 4~10장 드롭 (객체를 여러 각도에서 촬영)<br>
+          <span style="display:inline-block;width:18px;height:18px;background:#1E4FAA;color:#fff;border-radius:4px;text-align:center;line-height:18px;font-weight:700;font-size:10px">3</span> ▶ 텍스처 투영 실행<br>
+          <span style="display:inline-block;width:18px;height:18px;background:#1E4FAA;color:#fff;border-radius:4px;text-align:center;line-height:18px;font-weight:700;font-size:10px">4</span> OBJ + MTL + PNG 저장
+        </div>
+
+        <!-- Mesh drop -->
+        <div class="p2-label" style="margin:10px 0 4px">1. 메쉬 (.OBJ / .FBX / .GLB / .PLY)</div>
+        <div class="p2-drop" id="p5-mesh-drop" style="padding:16px 12px;margin-bottom:10px">
+          <div class="pd-icon">🔺</div>
+          <div style="font-size:13px;font-weight:600">OBJ · FBX · GLB · PLY 드롭</div>
+          <div class="pd-name" id="p5-mesh-name"></div>
+        </div>
+        <input type="file" id="p5-mesh-input" accept=".obj,.fbx,.glb,.ply" style="display:none">
+
+        <!-- Photos drop (multiple) -->
+        <div class="p2-label" style="margin:10px 0 4px">2. 사진 <span id="p5-photo-count" style="color:#93C5FD;font-weight:700">(0/10)</span></div>
+        <div class="p2-drop" id="p5-photo-drop" style="padding:16px 12px;margin-bottom:6px">
+          <div class="pd-icon">📷</div>
+          <div style="font-size:13px;font-weight:600">사진 4~10장 드롭/선택</div>
+          <div class="pd-hint">.jpg .jpeg .png .webp — 여러 장 한 번에 선택 가능</div>
+        </div>
+        <input type="file" id="p5-photo-input" accept=".jpg,.jpeg,.png,.webp" multiple style="display:none">
+
+        <!-- Photo thumbs -->
+        <div id="p5-photo-thumbs" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px"></div>
+        <button class="p2-btn sec" onclick="p5ClearPhotos()" style="width:100%;padding:6px;font-size:11px">🗑 사진 초기화</button>
+      </div>
+
+      <div class="p2-panel">
+        <div class="p2-title">⚙️ 설정</div>
+        <div class="p2-label" style="margin-bottom:4px">텍스처 해상도</div>
+        <div style="display:flex;gap:4px;margin-bottom:10px">
+          <button class="p2-btn sec p5-size-btn" data-p5size="1024" onclick="p5SetSize(1024)" style="flex:1;font-size:11px;padding:6px 2px">1K</button>
+          <button class="p2-btn sec p5-size-btn p5-size-active" data-p5size="2048" onclick="p5SetSize(2048)" style="flex:1;font-size:11px;padding:6px 2px">2K ⭐</button>
+          <button class="p2-btn sec p5-size-btn" data-p5size="4096" onclick="p5SetSize(4096)" style="flex:1;font-size:11px;padding:6px 2px">4K</button>
+        </div>
+
+        <button class="p2-btn" id="p5-run-btn" disabled onclick="p5Run()"
+          style="width:100%;background:#1E4FAA;color:#fff;font-weight:700;padding:12px;font-size:14px;margin-bottom:6px">
+          ▶ 텍스처 투영 실행
+        </button>
+        <div style="font-size:10px;color:#A0A0A0;line-height:1.4">
+          SfM(COLMAP) → ICP 정합 → UV 언랩 → 카메라별 projective texturing
+        </div>
+      </div>
+
+      <div class="p2-panel" id="p5-save-panel" style="display:none">
+        <div class="p2-title">💾 저장</div>
+        <button class="p2-btn" onclick="p5SaveOBJ()"
+          style="width:100%;background:#2A2A2A;color:#E8E8E8;font-weight:700;padding:10px;margin-bottom:4px">
+          💾 OBJ + MTL + PNG
+        </button>
+        <div style="font-size:10px;color:#888">텍스처 투영된 메쉬 + MTL + PNG 3파일 세트</div>
+      </div>
+    </div>
+
+    <!-- 중앙: 3D 뷰어 -->
+    <div>
+      <div class="viewer-wrap" id="p5-viewer-wrap" style="height:max(520px, calc(100vh - 200px));position:relative">
+        <canvas id="p5-canvas" style="width:100%;height:100%;display:block;cursor:grab"></canvas>
+        <div class="viewer-overlay">
+          <div class="vbadge" id="p5-badge">메쉬 + 사진을 로드하세요</div>
+        </div>
+        <div class="viewer-hint">
+          Alt+LMB = 회전 &nbsp;·&nbsp; Alt+MMB = 패닝 &nbsp;·&nbsp; 스크롤 = 줌 &nbsp;·&nbsp; F = 전체보기
+        </div>
+        <div id="p5-viewer-loading" class="viewer-loading">
+          <div class="vl-card">
+            <div class="vl-spinner"></div>
+            <div class="vl-title" id="p5-loading-title">사진 텍스처 투영 중...</div>
+            <div class="vl-sub" id="p5-loading-sub">SfM 카메라 포즈 복원 중</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 오른쪽: 2D 텍스처 + 통계 -->
+    <div>
+      <div class="p2-panel">
+        <div class="p2-title">🖼 생성된 텍스처</div>
+        <div style="background:#0A0A0A;border:1px solid #333;border-radius:8px;padding:4px;aspect-ratio:1/1;position:relative;overflow:hidden">
+          <img id="p5-tex-img" alt="텍스처"
+            style="width:100%;height:100%;object-fit:contain;display:none">
+          <div id="p5-tex-placeholder" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#555;font-size:12px">
+            아직 생성 안 됨
+          </div>
+        </div>
+        <div id="p5-tex-info" style="font-size:10px;color:#A0A0A0;margin-top:6px;text-align:center"></div>
+        <div id="p5-fallback-badge" style="display:none;margin-top:8px;padding:10px 12px;border-radius:8px;
+             background:linear-gradient(145deg,#3A2E1A,#2A1F10);border:1px solid #8B6914;
+             color:#E8C458;font-size:11px;line-height:1.5">
+          <div style="font-weight:700;margin-bottom:4px">⚠ Fallback 모드 — 평균색 블렌드</div>
+          <div id="p5-fallback-reason" style="color:#B8A048;font-size:10px;word-break:break-word"></div>
+          <div style="color:#888;font-size:10px;margin-top:6px">
+            SfM 재구성 실패로 투영 대신 사진 평균색을 사용했습니다.
+            더 많은 중첩 사진(60%+)으로 재시도하면 품질이 향상됩니다.
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="js/core.js" defer></script>
+<script src="js/hsv.js" defer></script>
+<script src="js/page2-collider.js" defer></script>
+<script src="js/page3-pipeline.js" defer></script>
+<script src="js/page4-bake.js" defer></script>
+<script src="js/page5-phototex.js" defer></script>
+</body>
+</html>
