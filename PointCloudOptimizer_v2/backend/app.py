@@ -40,7 +40,14 @@ from backend.core import glb_export as glb_core
 from backend.core import unitypackage as unitypkg_core
 from backend.core import photo_texture as photo_tex_core
 
-app = FastAPI(title="PointCloud Optimizer", version="3.0.0")
+app = FastAPI(title="PointCloud Optimizer v2 (LCC edition)", version="2.0.0")
+
+# v2 — LCC (XGrids PortalCam) endpoints
+try:
+    from backend import lcc_api
+    app.include_router(lcc_api.router)
+except Exception as _lcc_e:
+    print(f"[warn] lcc_api not loaded: {_lcc_e}")
 
 app.add_middleware(
     CORSMiddleware,
