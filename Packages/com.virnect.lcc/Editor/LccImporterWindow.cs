@@ -149,7 +149,7 @@ namespace Virnect.Lcc.Editor
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
                 _TabButton(Tab.Scenes,   scenesLabel,   tabStyle, activeStyle);
-                _TabButton(Tab.Optimize, "📦 최적화",     tabStyle, activeStyle);
+                _TabButton(Tab.Optimize, "📦 자동처리",   tabStyle, activeStyle);
                 _TabButton(Tab.Collider, "🎮 콜라이더",  tabStyle, activeStyle);
                 _TabButton(Tab.Mesh,     "🔺 메쉬 변환", tabStyle, activeStyle);
                 _TabButton(Tab.Bake,     "🖼 베이크",    tabStyle, activeStyle);
@@ -509,50 +509,53 @@ namespace Virnect.Lcc.Editor
         void _V1AppendLog(string msg) { _v1Log += msg + "\n"; Repaint(); }
         void _V1SetBusy(bool b) { _v1Busy = b; Repaint(); }
 
-        // ──────── 📦 OPTIMIZE (v1 page 1) ────────────────────────────────
+        // ──────── 📦 AUTOMATE (v1 전체 자동 처리) ────────────────────────
+        //
+        // v1 page 1 "품질별 PLY 생성" 은 브라우저 JS 만의 로직이라 Editor 직접 실행 불가.
+        // 대신 /api/automate 엔드포인트를 호출 — 콜라이더 + 메쉬 + 베이크 전 자동 처리.
+        // 완료 후 메쉬 OBJ 다운로드.
         void _OptimizeTab()
         {
-            EditorGUILayout.LabelField("📦 포인트 클라우드 최적화 (v1 page 1)", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("📦 전체 자동 처리 (v1 automate)", EditorStyles.boldLabel);
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
                 if (!_V1Ready()) return;
                 _V1CommonInputOutput();
-                EditorGUILayout.LabelField("생성할 품질 레벨", EditorStyles.miniBoldLabel);
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    _optQ60 = EditorGUILayout.ToggleLeft("60% (High)", _optQ60);
-                    _optQ40 = EditorGUILayout.ToggleLeft("40% (Medium)", _optQ40);
-                    _optQ20 = EditorGUILayout.ToggleLeft("20% (Low)", _optQ20);
-                }
+                EditorGUILayout.HelpBox(
+                    "자동 파이프라인: 메쉬 콜라이더 → 포인트→메쉬 변환 → (PLY 에 색상 있으면 텍스처 베이크) → 결과 OBJ 다운로드. 품질별 PLY 다운샘플은 v1 웹 UI 에서만 가능합니다.",
+                    MessageType.Info);
+                if (GUILayout.Button("웹 UI 에서 품질별 PLY 다운샘플 (v1 page 1)", GUILayout.Height(22)))
+                    Application.OpenURL(LccServerManager.BaseUrl + "/");
                 EditorGUILayout.Space(4);
                 GUI.enabled = !_v1Busy && !string.IsNullOrEmpty(_v1InputFile);
                 var prev = GUI.backgroundColor; GUI.backgroundColor = kAccent;
-                if (GUILayout.Button(_v1Busy ? "⏳ 처리 중..." : "▶ 변환 시작 (automate)", GUILayout.Height(30)))
-                    _RunOptimize();
+                if (GUILayout.Button(_v1Busy ? "⏳ 처리 중..." : "▶ 전체 자동 처리 (automate)", GUILayout.Height(30)))
+                    _RunAutomate();
                 GUI.backgroundColor = prev; GUI.enabled = true;
             }
             _V1LogBox();
         }
 
-        void _RunOptimize()
+        void _RunAutomate()
         {
             _V1SetBusy(true); _v1Log = ""; _V1AppendLog("업로드 중: " + _v1InputFile);
             LccV1Client.UploadPath(_v1InputFile, (sid, err) =>
             {
                 if (err != null) { _V1AppendLog("❌ upload: " + err); _V1SetBusy(false); return; }
-                _v1SessionId = sid; _V1AppendLog("sid=" + sid + " · 파이프라인 시작");
-                // v1 automate endpoint with quality levels
-                var levels = new List<int>();
-                if (_optQ60) levels.Add(60);
-                if (_optQ40) levels.Add(40);
-                if (_optQ20) levels.Add(20);
-                var body = "{\"quality_levels\":[" + string.Join(",", levels) + "]}";
+                _V1AppendLog("sid=" + sid + " · automate 파이프라인 시작 (콜라이더+메쉬+베이크)");
+                var body = "{}";
                 LccV1Client.PostJsonReadSse(LccV1Client.BaseUrl + "/api/automate/" + sid, body,
                     finalEvent => {
-                        _V1AppendLog("✓ done: " + finalEvent);
-                        // Output location hint
-                        _V1AppendLog("결과는 '" + (_v1OutputDir==""?"~/Downloads":_v1OutputDir) + "' 에 저장 (별도 다운로드 버튼 사용)");
-                        _V1SetBusy(false);
+                        _V1AppendLog("✓ automate 완료: " + finalEvent);
+                        // Download mesh OBJ
+                        string outDir = string.IsNullOrEmpty(_v1OutputDir)
+                            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads")
+                            : _v1OutputDir;
+                        var savePath = Path.Combine(outDir,
+                            LccV1Client.SafeStem(_v1InputFile) + "_automate.obj");
+                        LccV1Client.DownloadBinary(LccV1Client.BaseUrl + "/api/mesh/" + sid, savePath,
+                            bytes => { _V1AppendLog($"✓ OBJ 저장: {savePath} ({bytes/1024.0/1024.0:F1} MB)"); _V1SetBusy(false); },
+                            e => { _V1AppendLog("⚠ OBJ download skipped: " + e); _V1SetBusy(false); });
                     },
                     msg => { _V1AppendLog("❌ " + msg); _V1SetBusy(false); });
             });
