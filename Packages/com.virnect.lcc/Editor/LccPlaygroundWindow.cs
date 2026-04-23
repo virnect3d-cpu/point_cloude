@@ -18,7 +18,10 @@ namespace Virnect.Lcc.Editor
         [Range(0, 4)] int _lodLevel = 0;
         bool _addCollider = true;
         bool _colorizeMesh = true;
-        int  _colorSourceLod = 3;         // 색상 소스 LOD — LOD3 (≈641K) 가 속도 대비 품질 좋음
+        public enum ColorSourceMode { SplatDataBin, ExternalPly }
+        ColorSourceMode _colorSource = ColorSourceMode.SplatDataBin;
+        int  _colorSourceLod = 3;         // data.bin 소스일 때 LOD
+        string _externalPlyPath = "";     // ExternalPly 선택 시 읽어올 경로
         float _colorizerCellSize = 1.0f;  // voxel grid cell (m)
         int  _colorizerK = 6;             // k-NN 이웃 수
         bool _hideSplatAfterColorize = false;
@@ -188,10 +191,26 @@ namespace Virnect.Lcc.Editor
                 using (new EditorGUI.DisabledScope(!_addCollider))
                 {
                     EditorGUI.indentLevel++;
-                    _colorizeMesh = EditorGUILayout.ToggleLeft("🎨 Colorize Mesh  (k-NN from splat RGB)", _colorizeMesh);
+                    _colorizeMesh = EditorGUILayout.ToggleLeft("🎨 Colorize Mesh  (k-NN color transfer)", _colorizeMesh);
                     using (new EditorGUI.DisabledScope(!_colorizeMesh))
                     {
-                        _colorSourceLod       = EditorGUILayout.IntSlider("  color source LOD", _colorSourceLod, 0, 4);
+                        _colorSource = (ColorSourceMode)EditorGUILayout.EnumPopup("  color source", _colorSource);
+                        if (_colorSource == ColorSourceMode.SplatDataBin)
+                        {
+                            _colorSourceLod = EditorGUILayout.IntSlider("  source LOD", _colorSourceLod, 0, 4);
+                        }
+                        else
+                        {
+                            using (new GUILayout.HorizontalScope())
+                            {
+                                _externalPlyPath = EditorGUILayout.TextField("  external PLY", _externalPlyPath);
+                                if (GUILayout.Button("…", GUILayout.Width(28)))
+                                {
+                                    string picked = EditorUtility.OpenFilePanel("Colored point cloud PLY", "", "ply");
+                                    if (!string.IsNullOrEmpty(picked)) _externalPlyPath = picked.Replace('\\', '/');
+                                }
+                            }
+                        }
                         _colorizerCellSize    = EditorGUILayout.Slider("  voxel cell (m)", _colorizerCellSize, 0.2f, 3f);
                         _colorizerK           = EditorGUILayout.IntSlider("  k neighbors", _colorizerK, 1, 16);
                         _hideSplatAfterColorize = EditorGUILayout.ToggleLeft("  hide splats after colorize", _hideSplatAfterColorize);
@@ -333,7 +352,9 @@ namespace Virnect.Lcc.Editor
             int colorSourceLod = 3,
             float colorizerCellSize = 1.0f,
             int colorizerK = 6,
-            bool hideSplatAfterColorize = false)
+            bool hideSplatAfterColorize = false,
+            ColorSourceMode colorSource = ColorSourceMode.SplatDataBin,
+            string externalPlyPath = "")
         {
             var w = CreateInstance<LccPlaygroundWindow>();
             try
@@ -346,7 +367,9 @@ namespace Virnect.Lcc.Editor
                 w._cleanLaunch    = cleanLaunch;
                 w._heightOffset   = heightOffset;
                 w._colorizeMesh   = colorizeMesh;
+                w._colorSource    = colorSource;
                 w._colorSourceLod = colorSourceLod;
+                w._externalPlyPath = externalPlyPath;
                 w._colorizerCellSize = colorizerCellSize;
                 w._colorizerK     = colorizerK;
                 w._hideSplatAfterColorize = hideSplatAfterColorize;
@@ -454,17 +477,33 @@ namespace Virnect.Lcc.Editor
                 vizMesh.RecalculateBounds();
                 vizMesh.RecalculateNormals();
 
-                double t0 = EditorApplication.timeSinceStartup;
-                var splats = LccSplatDecoder.DecodeLod(_target, _colorSourceLod);
-                double t1 = EditorApplication.timeSinceStartup;
-
                 var opts = LccMeshColorizer.Options.Default;
                 opts.cellSize = _colorizerCellSize;
                 opts.k = _colorizerK;
                 opts.maxRadius = _colorizerCellSize * 3f;
 
-                LccMeshColorizer.Colorize(vizMesh, splats, opts);
-                double t2 = EditorApplication.timeSinceStartup;
+                string summary;
+                double t0 = EditorApplication.timeSinceStartup;
+
+                if (_colorSource == ColorSourceMode.ExternalPly)
+                {
+                    if (string.IsNullOrEmpty(_externalPlyPath) || !System.IO.File.Exists(_externalPlyPath))
+                        throw new System.IO.FileNotFoundException($"external PLY 경로 없음: {_externalPlyPath}");
+
+                    var cloud = LccColoredPointCloudPlyLoader.Load(_externalPlyPath);
+                    double t1 = EditorApplication.timeSinceStartup;
+                    LccMeshColorizer.Colorize(vizMesh, cloud.positions, cloud.colors, opts);
+                    double t2 = EditorApplication.timeSinceStartup;
+                    summary = $"source=PLY({System.IO.Path.GetFileName(_externalPlyPath)}) · {cloud.positions.Length:N0} pts · load {(t1 - t0) * 1000:F0} ms · colorize {(t2 - t1) * 1000:F0} ms";
+                }
+                else
+                {
+                    var splats = LccSplatDecoder.DecodeLod(_target, _colorSourceLod);
+                    double t1 = EditorApplication.timeSinceStartup;
+                    LccMeshColorizer.Colorize(vizMesh, splats, opts);
+                    double t2 = EditorApplication.timeSinceStartup;
+                    summary = $"source=data.bin LOD {_colorSourceLod} · {splats.Length:N0} splats · decode {(t1 - t0) * 1000:F0} ms · colorize {(t2 - t1) * 1000:F0} ms";
+                }
 
                 var vizGO = new GameObject("__LccColoredMesh");
                 vizGO.transform.SetParent(splatGO.transform, false);
@@ -476,7 +515,7 @@ namespace Virnect.Lcc.Editor
                 mr.sharedMaterial = new Material(shader) { name = "LccColored_" + _target.name };
 
                 Undo.RegisterCreatedObjectUndo(vizGO, "LCC Playground · Colored Mesh");
-                Debug.Log($"[LccPlayground] ColoredMesh · {vizMesh.vertexCount:N0} verts · decode {(t1 - t0) * 1000:F0} ms · colorize {(t2 - t1) * 1000:F0} ms · LOD {_colorSourceLod} ({splats.Length:N0} splats)");
+                Debug.Log($"[LccPlayground] ColoredMesh · {vizMesh.vertexCount:N0} verts · {summary}");
             }
             catch (System.Exception ex)
             {

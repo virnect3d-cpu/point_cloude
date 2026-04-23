@@ -41,12 +41,31 @@ namespace Virnect.Lcc
         /// <summary>
         /// Mesh 의 vertex 들에 splat 색을 입혀 Color32[] 반환 & mesh.colors32 에 쓰기.
         /// splats 좌표계는 splat 원본 좌표계 (Unity world 회전 적용 전) 와 동일해야 함.
-        /// mesh 는 collider 로 이미 씬에 적재된 상태일 수 있으니, 원본 정점 위치를 그대로 사용.
         /// </summary>
         public static Color32[] Colorize(Mesh mesh, LccSplatDecoder.Point[] splats, Options opts)
         {
-            if (mesh == null || splats == null || splats.Length == 0)
+            if (splats == null || splats.Length == 0) return null;
+            var positions = new Vector3[splats.Length];
+            var srcColors = new Color32[splats.Length];
+            for (int i = 0; i < splats.Length; i++)
+            {
+                var p = splats[i].position;
+                positions[i] = new Vector3(p.x, p.y, p.z);
+                srcColors[i] = splats[i].color;
+            }
+            return Colorize(mesh, positions, srcColors, opts);
+        }
+
+        /// <summary>
+        /// Generic point-cloud → mesh 컬러 전송 (positions + colors).
+        /// External colored PLY (XGrids_Splats_LODn.ply 등) 를 source 로 쓸 때 이 오버로드 사용.
+        /// </summary>
+        public static Color32[] Colorize(Mesh mesh, Vector3[] srcPositions, Color32[] srcColors, Options opts)
+        {
+            if (mesh == null || srcPositions == null || srcPositions.Length == 0)
                 return null;
+            if (srcColors == null || srcColors.Length != srcPositions.Length)
+                throw new System.ArgumentException("srcPositions 와 srcColors 길이 불일치");
 
             var verts = mesh.vertices;
             int n = verts.Length;
@@ -57,10 +76,10 @@ namespace Virnect.Lcc
             float maxR2 = opts.maxRadius > 0 ? opts.maxRadius * opts.maxRadius : float.PositiveInfinity;
 
             // 1) 빌드: sparse hash-grid
-            var grid = new Dictionary<int3, List<int>>(capacity: splats.Length / 128);
-            for (int i = 0; i < splats.Length; i++)
+            var grid = new Dictionary<int3, List<int>>(capacity: srcPositions.Length / 128);
+            for (int i = 0; i < srcPositions.Length; i++)
             {
-                var p = splats[i].position;
+                var p = srcPositions[i];
                 var key = new int3(
                     (int)math.floor(p.x * invCs),
                     (int)math.floor(p.y * invCs),
@@ -79,7 +98,6 @@ namespace Virnect.Lcc
 
             void ProcessRange(int from, int to)
             {
-                // thread-local top-k heap (simple flat arrays — k 작음)
                 var bestD2 = new float[k];
                 var bestI  = new int[k];
 
@@ -101,12 +119,11 @@ namespace Virnect.Lcc
                         for (int bi = 0; bi < bucket.Count; bi++)
                         {
                             int si = bucket[bi];
-                            var sp = splats[si].position;
+                            var sp = srcPositions[si];
                             float dxv = sp.x - v.x, dyv = sp.y - v.y, dzv = sp.z - v.z;
                             float d2 = dxv * dxv + dyv * dyv + dzv * dzv;
                             if (d2 > maxR2) continue;
 
-                            // insert into top-k (bubble up)
                             if (d2 >= bestD2[k - 1]) continue;
                             int slot = k - 1;
                             while (slot > 0 && bestD2[slot - 1] > d2)
@@ -120,14 +137,13 @@ namespace Virnect.Lcc
                         }
                     }
 
-                    // inverse-distance blend
                     if (bestI[0] < 0) { colors[vi] = fallback; continue; }
                     float wsum = 0f, r = 0f, g = 0f, b = 0f;
                     for (int i = 0; i < k; i++)
                     {
                         if (bestI[i] < 0) break;
                         float w = 1f / math.max(1e-4f, math.sqrt(bestD2[i]));
-                        var c = splats[bestI[i]].color;
+                        var c = srcColors[bestI[i]];
                         r += c.r * w; g += c.g * w; b += c.b * w; wsum += w;
                     }
                     float inv = 1f / wsum;
