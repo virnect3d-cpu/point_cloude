@@ -562,25 +562,34 @@ namespace Virnect.Lcc.Editor
         }
 
         // ──────── 🎮 COLLIDER (v1 page 2) ────────────────────────────────
+        // /api/mesh-collider 는 단독으로 실행 가능 — Poisson/BPA 기반 메쉬 콜라이더 생성.
+        // /api/auto/collider 는 automate 가 먼저 돌아야 하므로 여기서는 사용 안 함.
+        bool _colliderConvexParts = false;
+        int  _colliderDepth = 7;
+        int  _colliderTargetTris = 3000;
+
         void _ColliderTab()
         {
-            EditorGUILayout.LabelField("🎮 유니티 콜라이더 (v1 page 2)", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("🎮 유니티 메쉬 콜라이더 (v1 page 2)", EditorStyles.boldLabel);
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
                 if (!_V1Ready()) return;
                 _V1CommonInputOutput();
-                _colliderMode = EditorGUILayout.Popup("모드",
-                    _colliderMode == "box" ? 0 : 1,
-                    new[] { "자동 박스 (AABB)", "자동 메쉬 (Poisson+ICP)" }) == 0 ? "box" : "mesh";
+                _colliderDepth      = EditorGUILayout.IntSlider("Poisson depth", _colliderDepth, 5, 10);
+                _colliderTargetTris = EditorGUILayout.IntSlider("target 삼각형",  _colliderTargetTris, 500, 20000);
+                _colliderConvexParts = EditorGUILayout.ToggleLeft(
+                    new GUIContent("ACD 분해 (다중 Convex 파트 — Unity 동적 Rigidbody 호환)",
+                        "체크하면 mesh 를 여러 convex part 로 분해해 반환. Unity 의 물리 엔진에서 동적 콜라이더로 쓰기 좋음."),
+                    _colliderConvexParts);
                 EditorGUILayout.HelpBox(
-                    "3D 뷰포트/드래그 배치는 Unity 에디터에 직접 통합되지 않아 웹 UI 사용을 권장합니다. 자동 생성 + JSON 다운로드는 여기서 지원.",
+                    "Poisson+ICP 기반 메쉬 콜라이더를 JSON 으로 저장. 수동 드래그 배치·박스는 웹 UI 2페이지 사용.",
                     MessageType.Info);
                 GUI.enabled = !_v1Busy && !string.IsNullOrEmpty(_v1InputFile);
                 var prev = GUI.backgroundColor; GUI.backgroundColor = kAccent;
-                if (GUILayout.Button(_v1Busy ? "⏳" : "▶ 자동 콜라이더 생성 + JSON 다운로드", GUILayout.Height(28)))
+                if (GUILayout.Button(_v1Busy ? "⏳" : "▶ 자동 메쉬 콜라이더 생성 + JSON 저장", GUILayout.Height(28)))
                     _RunCollider();
                 GUI.backgroundColor = prev; GUI.enabled = true;
-                if (GUILayout.Button("웹 UI 에서 열기 (http://127.0.0.1:" + LccServerManager.Port + " → 2페이지)", GUILayout.Height(22)))
+                if (GUILayout.Button("웹 UI 에서 2페이지 열기 (수동 박스 드래그)", GUILayout.Height(22)))
                     Application.OpenURL(LccServerManager.BaseUrl + "/");
             }
             _V1LogBox();
@@ -588,22 +597,25 @@ namespace Virnect.Lcc.Editor
 
         void _RunCollider()
         {
-            _V1SetBusy(true); _v1Log = "";
+            _V1SetBusy(true); _v1Log = ""; _V1AppendLog("업로드 중...");
             LccV1Client.UploadPath(_v1InputFile, (sid, err) =>
             {
-                if (err != null) { _V1AppendLog("❌ " + err); _V1SetBusy(false); return; }
-                _V1AppendLog("sid=" + sid);
+                if (err != null) { _V1AppendLog("❌ upload: " + err); _V1SetBusy(false); return; }
+                _V1AppendLog("sid=" + sid + " · mesh-collider 생성 중...");
                 var url = LccV1Client.BaseUrl + "/api/mesh-collider/" + sid +
-                          "?method=poisson&depth=7&target_tris=3000&snap=2&convex_parts=false";
-                if (_colliderMode == "box")
-                    url = LccV1Client.BaseUrl + "/api/auto/collider/" + sid + "?mode=box";
+                          $"?method=poisson&depth={_colliderDepth}" +
+                          $"&target_tris={_colliderTargetTris}&snap=2" +
+                          $"&convex_parts={(_colliderConvexParts?"true":"false")}";
                 var req = UnityWebRequest.Get(url); req.timeout = 600;
                 var op = req.SendWebRequest();
                 op.completed += _ =>
                 {
                     try {
                         if (req.result != UnityWebRequest.Result.Success)
-                        { _V1AppendLog("❌ HTTP " + req.responseCode); return; }
+                        {
+                            _V1AppendLog($"❌ HTTP {req.responseCode}: {req.downloadHandler.text}");
+                            return;
+                        }
                         string outDir = string.IsNullOrEmpty(_v1OutputDir)
                             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads")
                             : _v1OutputDir;
@@ -611,7 +623,8 @@ namespace Virnect.Lcc.Editor
                         var savePath = Path.Combine(outDir,
                             LccV1Client.SafeStem(_v1InputFile) + "_collider.json");
                         File.WriteAllText(savePath, req.downloadHandler.text);
-                        _V1AppendLog("✓ saved: " + savePath);
+                        long b = req.downloadHandler.text.Length;
+                        _V1AppendLog($"✓ 저장: {savePath} ({b/1024.0:F1} KB)");
                     } finally { req.Dispose(); _V1SetBusy(false); }
                 };
             });
