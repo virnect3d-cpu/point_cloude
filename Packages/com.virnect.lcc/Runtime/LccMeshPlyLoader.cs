@@ -27,6 +27,11 @@ namespace Virnect.Lcc
             var mesh = new Mesh { name = Path.GetFileNameWithoutExtension(absolutePath) };
             if (vertexCount > 65535) mesh.indexFormat = IndexFormat.UInt32;
 
+            // payload 최소 크기 검증 — vertex(12B) + face(1+12B) 가 raw 안에 들어가야 함
+            long minPayload = (long)vertexCount * 12 + (long)faceCount * 13;
+            if (headerEnd + minPayload > raw.Length)
+                throw new InvalidDataException($"PLY: truncated — need {minPayload}B payload, have {raw.Length - headerEnd}B");
+
             var verts = new Vector3[vertexCount];
             int cursor = headerEnd;
             for (int i = 0; i < vertexCount; i++)
@@ -41,6 +46,8 @@ namespace Virnect.Lcc
             int ti = 0;
             for (int f = 0; f < faceCount; f++)
             {
+                if (cursor + 13 > raw.Length)
+                    throw new InvalidDataException($"PLY: truncated at face {f}/{faceCount}");
                 byte n = raw[cursor++];
                 if (n != 3)
                     throw new InvalidDataException($"PLY: only triangular faces supported (face {f} has {n} verts)");

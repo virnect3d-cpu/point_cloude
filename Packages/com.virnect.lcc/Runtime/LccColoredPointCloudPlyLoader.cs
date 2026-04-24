@@ -62,6 +62,11 @@ namespace Virnect.Lcc
             var positions = new Vector3[vertexCount];
             var colors    = new Color32[vertexCount];
 
+            // 바이너리 payload 경계 검증 — malformed PLY 에서 raw 배열 범위 밖 읽기 방지
+            long needed = (long)vertexCount * recordSize;
+            if (headerEnd + needed > raw.Length)
+                throw new InvalidDataException($"PLY: truncated — header says {vertexCount} verts × {recordSize}B but payload has only {raw.Length - headerEnd}B");
+
             int cursor = headerEnd;
             for (int i = 0; i < vertexCount; i++)
             {
