@@ -68,6 +68,26 @@ namespace Virnect.Lcc
         }
 
         /// <summary>
+        /// Brute-force initial rotation search + Coarse→Fine refinement.
+        /// LCC Z-축 (수직축) 주위로 0/90/180/270° 초기값 시도 — 각도가 크게 틀어진 스캔 정합.
+        /// 가장 낮은 coarse RMSE 선택 후 Fine 으로 정밀화. Z 축을 가정한다는 건 스캔이
+        /// 비슷한 수평면 상에 있음을 전제 (LCC 는 일반적으로 실내 스캔이라 성립).
+        /// </summary>
+        public static Result AlignBrute(Vector3[] sourcePoints, Vector3[] targetPoints)
+        {
+            float[] zAngles = { 0f, 90f, 180f, 270f };
+            Result best = default; float bestRmse = float.PositiveInfinity;
+            foreach (var ang in zAngles)
+            {
+                Matrix4x4 init = Matrix4x4.Rotate(Quaternion.Euler(0f, 0f, ang));
+                var r = Align(sourcePoints, targetPoints, Options.Coarse, init);
+                if (r.rmseAfter < bestRmse) { bestRmse = r.rmseAfter; best = r; }
+            }
+            var rF = Align(sourcePoints, targetPoints, Options.Fine, best.transform);
+            return rF;
+        }
+
+        /// <summary>
         /// source cloud 를 target cloud 에 맞추는 rigid transform 계산.
         /// 반환 transform 은 row-major 4x4 — source vertex 에 적용하면 target world 에 정합.
         /// sourceInit 은 이미 알고 있는 초기 추정 (e.g. 현재 GameObject world transform).

@@ -926,13 +926,14 @@ namespace Virnect.Lcc.Editor
             {
                 _alignBase   = (LccScene)EditorGUILayout.ObjectField("base (고정)",    _alignBase,   typeof(LccScene), false);
                 _alignTarget = (LccScene)EditorGUILayout.ObjectField("target (정합 대상)", _alignTarget, typeof(LccScene), false);
-                _alignMode   = GUILayout.Toolbar(_alignMode, new[] { "Coarse", "Default", "Fine", "Coarse→Fine (권장)" });
+                _alignMode   = GUILayout.Toolbar(_alignMode, new[] { "Coarse", "Default", "Fine", "Coarse→Fine", "BRUTE (권장)" });
 
                 EditorGUILayout.HelpBox(
                     _alignMode == 0 ? "voxel 3m · reject 15m · 25 iter — 빠르고 큰 회전 허용"
                   : _alignMode == 1 ? "voxel 1m · reject 5m · 40 iter — 균형"
-                  : _alignMode == 2 ? "voxel 0.5m · reject 2m · 40 iter — 정밀. 근접 정렬된 상태에서 권장"
-                  :                   "Coarse 로 초기 근사 → Fine 으로 정밀화 — 가장 안정적",
+                  : _alignMode == 2 ? "voxel 0.5m · reject 2m · 40 iter — 정밀. 근접 정렬 전제"
+                  : _alignMode == 3 ? "Coarse → Fine — 안정"
+                  :                   "Z축 0/90/180/270° brute-force 초기 회전 search + Fine — 대각도 틀어진 스캔 복구",
                     MessageType.None);
 
                 bool ready = _alignBase != null && _alignTarget != null && _alignBase != _alignTarget;
@@ -979,7 +980,13 @@ namespace Virnect.Lcc.Editor
                 var init = Matrix4x4.identity;
 
                 LccPointCloudRegistration.Result r;
-                if (_alignMode == 3)
+                if (_alignMode == 4)
+                {
+                    _Log($"[BRUTE] Z={{0/90/180/270}}° search · src {srcP.Length:N0} pts, tgt {tgtP.Length:N0} pts");
+                    r = LccPointCloudRegistration.AlignBrute(srcP, tgtP);
+                    _Log($"final iter={r.iterations}  rmse {r.rmseBefore:F3} → {r.rmseAfter:F3} m  matched {r.correspondences}  converged={r.converged}");
+                }
+                else if (_alignMode == 3)
                 {
                     _Log($"[Coarse] start · src {srcP.Length:N0} pts, tgt {tgtP.Length:N0} pts");
                     var rC = LccPointCloudRegistration.Align(srcP, tgtP, LccPointCloudRegistration.Options.Coarse, init);
@@ -1007,11 +1014,9 @@ namespace Virnect.Lcc.Editor
                 _Log($"Δ position = {localPos}");
                 _Log($"Δ rotation = {localRot.eulerAngles}");
 
-                // 씬에서 Splat_<target> / Mesh_<target> 찾아서 localPos/localRot 적용
-                // 주의: 씬 오브젝트엔 이미 -90°X 회전이 있음 (LCC Z-up → Unity Y-up)
-                // ICP transform 은 로컬 좌표계에서 계산됐으므로, 로컬→월드로 컨버트:
-                //   worldPos_new = Rz * (R_localPos)  where Rz = -90°X
-                //   worldRot_new = Rz * R_local      (quaternion composition)
+                // 씬 오브젝트 월드 변환 공식:
+                //   p_world = zUpToYUp * (R_icp * p_local + t_icp)
+                //   → worldRot = zUpToYUp * R_icp, worldPos = zUpToYUp * t_icp
                 Quaternion zUpToYUp = Quaternion.Euler(-90f, 0f, 0f);
                 Vector3 worldPos = zUpToYUp * localPos;
                 Quaternion worldRot = zUpToYUp * localRot;
@@ -1023,7 +1028,7 @@ namespace Virnect.Lcc.Editor
                     {
                         Undo.RecordObject(rootGO.transform, "ICP Align");
                         rootGO.transform.position = worldPos;
-                        rootGO.transform.rotation = worldRot * zUpToYUp; // 기본 -90X 유지 + 델타
+                        rootGO.transform.rotation = worldRot;
                         EditorUtility.SetDirty(rootGO);
                         applied++;
                     }
