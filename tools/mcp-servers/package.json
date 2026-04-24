@@ -1,0 +1,10 @@
+{
+  "name": "cloude-mcp-servers",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared node_modules root for custom MCP servers (Photoshop, Illustrator)",
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  }
+}

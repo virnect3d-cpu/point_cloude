@@ -1,0 +1,16 @@
+{
+  "name": "photoshop-mcp",
+  "version": "0.1.0",
+  "description": "MCP server driving Adobe Photoshop on Windows via COM + ExtendScript",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "photoshop-mcp": "index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  }
+}

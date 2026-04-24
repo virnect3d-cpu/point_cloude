@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "photoshop": {
+      "command": "node",
+      "args": ["./tools/mcp-servers/photoshop-mcp/index.js"]
+    },
+    "illustrator": {
+      "command": "node",
+      "args": ["./tools/mcp-servers/illustrator-mcp/index.js"]
+    }
+  }
+}

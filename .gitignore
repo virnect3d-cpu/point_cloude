@@ -29,3 +29,8 @@
 # OS
 .DS_Store
 Thumbs.db
+
+# Node (MCP servers)
+node_modules/
+npm-debug.log*
+
