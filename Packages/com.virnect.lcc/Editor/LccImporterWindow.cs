@@ -40,9 +40,15 @@ namespace Virnect.Lcc.Editor
         bool  _attachLodStreamer = true;
         int _selectedIndex = -1;
 
-        // Tabs — LCC + v1 5-page 흡수
-        enum Tab { Scenes, Optimize, Collider, Mesh, Bake, Photo, Server, Compare, Info }
+        // Tabs — LCC + v1 5-page 흡수 + Align
+        enum Tab { Scenes, Optimize, Collider, Mesh, Bake, Photo, Align, Server, Compare, Info }
         Tab _tab = Tab.Scenes;
+
+        // Align (ICP 정합) state
+        LccScene _alignBase;
+        LccScene _alignTarget;
+        int    _alignMode = 1;   // 0=Coarse, 1=Default, 2=Fine, 3=Coarse→Fine
+        string _alignLog = "";
 
         // ── v1 tab states ─────────────────────────────────────────────────
         string _v1InputFile = "";
@@ -130,6 +136,7 @@ namespace Virnect.Lcc.Editor
                 case Tab.Mesh:     _MeshTab();       break;
                 case Tab.Bake:     _BakeTab();       break;
                 case Tab.Photo:    _PhotoTab();      break;
+                case Tab.Align:    _AlignTab();      break;
                 case Tab.Server:   _ServerSection(); break;
                 case Tab.Compare:  _ApiCompareSection(); break;
                 case Tab.Info:     _QuickStartSection(); _InspectSelectedSection(); break;
@@ -160,6 +167,7 @@ namespace Virnect.Lcc.Editor
                 _TabButton(Tab.Mesh,     "🔺 메쉬 변환", tabStyle, activeStyle);
                 _TabButton(Tab.Bake,     "🖼 베이크",    tabStyle, activeStyle);
                 _TabButton(Tab.Photo,    "📷 사진텍스처", tabStyle, activeStyle);
+                _TabButton(Tab.Align,    "🎯 정합(ICP)", tabStyle, activeStyle);
                 _TabButton(Tab.Server,   serverLabel,   tabStyle, activeStyle);
                 _TabButton(Tab.Compare,  compareLabel,  tabStyle, activeStyle);
                 _TabButton(Tab.Info,     infoLabel,     tabStyle, activeStyle);
@@ -902,6 +910,142 @@ namespace Virnect.Lcc.Editor
                 GUI.backgroundColor = prev;
             }
             _V1LogBox();
+        }
+
+        // ──────── 🎯 ALIGN (ICP 정합) ─────────────────────────────────────
+        void _AlignTab()
+        {
+            EditorGUILayout.LabelField("🎯 LCC 정합 — ICP (Iterative Closest Point)", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "여러 LCC 스캔이 같은 공장의 다른 영역인데 로컬 원점이 달라 정합이 어긋날 때 사용. " +
+                "base 씬(고정) 에 target 씬을 ICP 로 맞춰 Transform 을 씬의 GameObject 에 적용합니다. " +
+                "proxy PLY 점들 voxel-downsample → nearest neighbor + Kabsch SVD 반복.",
+                MessageType.Info);
+
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                _alignBase   = (LccScene)EditorGUILayout.ObjectField("base (고정)",    _alignBase,   typeof(LccScene), false);
+                _alignTarget = (LccScene)EditorGUILayout.ObjectField("target (정합 대상)", _alignTarget, typeof(LccScene), false);
+                _alignMode   = GUILayout.Toolbar(_alignMode, new[] { "Coarse", "Default", "Fine", "Coarse→Fine (권장)" });
+
+                EditorGUILayout.HelpBox(
+                    _alignMode == 0 ? "voxel 3m · reject 15m · 25 iter — 빠르고 큰 회전 허용"
+                  : _alignMode == 1 ? "voxel 1m · reject 5m · 40 iter — 균형"
+                  : _alignMode == 2 ? "voxel 0.5m · reject 2m · 40 iter — 정밀. 근접 정렬된 상태에서 권장"
+                  :                   "Coarse 로 초기 근사 → Fine 으로 정밀화 — 가장 안정적",
+                    MessageType.None);
+
+                bool ready = _alignBase != null && _alignTarget != null && _alignBase != _alignTarget;
+                using (new EditorGUI.DisabledScope(!ready))
+                {
+                    var prev = GUI.backgroundColor; GUI.backgroundColor = kAccent;
+                    if (GUILayout.Button("▶ ICP 실행 & target 씬 GameObject 에 transform 적용", GUILayout.Height(30)))
+                        _RunAlign();
+                    GUI.backgroundColor = prev;
+                }
+
+                if (!string.IsNullOrEmpty(_alignLog))
+                {
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField("결과", EditorStyles.boldLabel);
+                    EditorGUILayout.TextArea(_alignLog, GUILayout.MinHeight(120));
+                }
+            }
+        }
+
+        void _RunAlign()
+        {
+            try
+            {
+                _alignLog = "";
+                string bPly = _alignBase.ResolveProxyMeshPlyAssetPath();
+                string tPly = _alignTarget.ResolveProxyMeshPlyAssetPath();
+                if (string.IsNullOrEmpty(bPly) || string.IsNullOrEmpty(tPly))
+                    throw new System.Exception("base/target proxy PLY 없음 — LCC_Drops 폴더 구조 확인");
+
+                double t0 = EditorApplication.timeSinceStartup;
+                var baseMesh   = LccMeshPlyLoader.Load(System.IO.Path.GetFullPath(bPly));
+                var targetMesh = LccMeshPlyLoader.Load(System.IO.Path.GetFullPath(tPly));
+                double t1 = EditorApplication.timeSinceStartup;
+
+                // proxy PLY 는 LCC 로컬 좌표계. Unity 씬에 배치할 때 -90°X 회전이 들어가지만
+                // ICP 는 점 "쌍" 사이의 rigid transform 만 계산하므로 둘 다 같은 (로컬) 좌표계
+                // 그대로 align → 결과 transform 도 로컬 공간에서 유효.
+
+                Vector3[] srcP = targetMesh.vertices;
+                Vector3[] tgtP = baseMesh.vertices;
+
+                // 초기 추정 — 현재 Scene2 에 배치된 GameObject transform 이 이미 원점이면 identity.
+                var init = Matrix4x4.identity;
+
+                LccPointCloudRegistration.Result r;
+                if (_alignMode == 3)
+                {
+                    _Log($"[Coarse] start · src {srcP.Length:N0} pts, tgt {tgtP.Length:N0} pts");
+                    var rC = LccPointCloudRegistration.Align(srcP, tgtP, LccPointCloudRegistration.Options.Coarse, init);
+                    _Log($"[Coarse] iter={rC.iterations}  rmse {rC.rmseBefore:F3} → {rC.rmseAfter:F3}  matched {rC.correspondences}");
+                    r = LccPointCloudRegistration.Align(srcP, tgtP, LccPointCloudRegistration.Options.Fine, rC.transform);
+                    _Log($"[Fine]   iter={r.iterations}  rmse {r.rmseBefore:F3} → {r.rmseAfter:F3}  matched {r.correspondences}");
+                }
+                else
+                {
+                    var opts = _alignMode == 0 ? LccPointCloudRegistration.Options.Coarse
+                             : _alignMode == 2 ? LccPointCloudRegistration.Options.Fine
+                             :                   LccPointCloudRegistration.Options.Default;
+                    _Log($"[{opts.voxelSize:F1}m voxel] start · src {srcP.Length:N0} pts, tgt {tgtP.Length:N0} pts");
+                    r = LccPointCloudRegistration.Align(srcP, tgtP, opts, init);
+                    _Log($"iter={r.iterations}  rmse {r.rmseBefore:F3} → {r.rmseAfter:F3} m  matched {r.correspondences}");
+                }
+
+                double t2 = EditorApplication.timeSinceStartup;
+                _Log($"converged={r.converged}  elapsed load {(t1-t0)*1000:F0} ms · icp {(t2-t1)*1000:F0} ms");
+
+                // transform 분해 → 씬 GameObject 에 적용
+                Matrix4x4 M = r.transform;
+                Vector3 localPos = new Vector3(M.m03, M.m13, M.m23);
+                Quaternion localRot = M.rotation;
+                _Log($"Δ position = {localPos}");
+                _Log($"Δ rotation = {localRot.eulerAngles}");
+
+                // 씬에서 Splat_<target> / Mesh_<target> 찾아서 localPos/localRot 적용
+                // 주의: 씬 오브젝트엔 이미 -90°X 회전이 있음 (LCC Z-up → Unity Y-up)
+                // ICP transform 은 로컬 좌표계에서 계산됐으므로, 로컬→월드로 컨버트:
+                //   worldPos_new = Rz * (R_localPos)  where Rz = -90°X
+                //   worldRot_new = Rz * R_local      (quaternion composition)
+                Quaternion zUpToYUp = Quaternion.Euler(-90f, 0f, 0f);
+                Vector3 worldPos = zUpToYUp * localPos;
+                Quaternion worldRot = zUpToYUp * localRot;
+
+                int applied = 0;
+                foreach (var rootGO in UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene().GetRootGameObjects())
+                {
+                    if (rootGO.name == "Splat_" + _alignTarget.name || rootGO.name == "Mesh_" + _alignTarget.name)
+                    {
+                        Undo.RecordObject(rootGO.transform, "ICP Align");
+                        rootGO.transform.position = worldPos;
+                        rootGO.transform.rotation = worldRot * zUpToYUp; // 기본 -90X 유지 + 델타
+                        EditorUtility.SetDirty(rootGO);
+                        applied++;
+                    }
+                }
+                _Log($"Scene 적용: {applied} GameObject (Splat_{_alignTarget.name}, Mesh_{_alignTarget.name})");
+                if (applied == 0)
+                    _Log("⚠ 씬에서 찾지 못함 — 현재 씬이 Scene2_MeshVsSplat 인지 확인");
+
+                UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(
+                    UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene());
+                Debug.Log("[ICP Align]\n" + _alignLog);
+            }
+            catch (System.Exception ex)
+            {
+                _Log("❌ " + ex.Message);
+                Debug.LogError($"[ICP Align] {ex.Message}\n{ex.StackTrace}");
+            }
+        }
+
+        void _Log(string s)
+        {
+            _alignLog += (string.IsNullOrEmpty(_alignLog) ? "" : "\n") + s;
         }
 
         // ── Inspect selected scene ────────────────────────────────────────
