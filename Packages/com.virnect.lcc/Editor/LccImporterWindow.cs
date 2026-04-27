@@ -570,7 +570,32 @@ namespace Virnect.Lcc.Editor
 
         void _ColliderTab()
         {
-            EditorGUILayout.LabelField("🎮 유니티 메쉬 콜라이더 (v1 page 2)", EditorStyles.boldLabel);
+            // ── A. In-Editor 베이크 (Python 서버 불필요) ────────────────
+            EditorGUILayout.LabelField("🎮 In-Editor 메쉬 콜라이더 (LCC proxy PLY 직결)", EditorStyles.boldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.HelpBox(
+                    "LCC 가 함께 export 한 mesh-files/<scene>.ply 를 읽어서\n" +
+                    " · LCC_Generated/<scene>_ProxyMesh.asset 생성\n" +
+                    " · 씬의 Splat_<scene> 자식 __LccCollider 의 MeshCollider 에 자동 연결\n" +
+                    "(서버/네트워크/Python 의존성 없음)",
+                    MessageType.Info);
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    var prev = GUI.backgroundColor; GUI.backgroundColor = kAccent;
+                    if (GUILayout.Button("▶ 현재 씬 자동 베이크", GUILayout.Height(28)))
+                        LccColliderBuilder.Menu_BakeActiveScene();
+                    GUI.backgroundColor = prev;
+                    if (GUILayout.Button("Scene5 열고 자동 베이크", GUILayout.Height(28)))
+                        LccColliderBuilder.Menu_OpenScene5AndBake();
+                }
+                if (GUILayout.Button("자산 강제 재생성 (현재 씬)", GUILayout.Height(22)))
+                    LccColliderBuilder.Menu_BakeActiveSceneRebuild();
+            }
+            EditorGUILayout.Space(6);
+
+            // ── B. v1 백엔드 (Poisson/BPA 재구성 — point cloud → mesh) ──
+            EditorGUILayout.LabelField("🐍 v1 서버 메쉬 콜라이더 (포인트클라우드 재구성)", EditorStyles.boldLabel);
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
                 if (!_V1Ready()) return;
