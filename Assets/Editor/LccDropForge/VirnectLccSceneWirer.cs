@@ -409,7 +409,11 @@ namespace LccDropForge
 
                 // Play 모드 마우스 회전 컴포넌트
                 var rotType = System.Type.GetType("LccInteractiveRotator, Assembly-CSharp");
-                if (rotType != null) splatGO.AddComponent(rotType);
+                if (rotType != null)
+                {
+                    var rot = splatGO.AddComponent(rotType) as MonoBehaviour;
+                    if (rot != null) rot.enabled = false;   // ⚠ 안전 디폴트 — Inspector 에서 사용자가 명시 enable 해야 동작
+                }
 
                 // _ArasP child: world identity (splat 정상 정렬)
                 var arasGO = new GameObject("_ArasP");
@@ -989,6 +993,31 @@ namespace LccDropForge
 
             // 더 이상 코드 진행 안함 — 옛 v2 메뉴 코드는 무시
             return;
+        }
+
+        [MenuItem("Tools/Lcc Drop Forge/Scene · 🛡 Disable ALL LccInteractiveRotator in current scene (정합 보호)")]
+        static void DevDisableAllInteractiveRotators()
+        {
+            var sm = UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene();
+            var rotType = System.Type.GetType("LccInteractiveRotator, Assembly-CSharp");
+            if (rotType == null) { Debug.LogError("[Disable Rot] LccInteractiveRotator 타입 없음"); return; }
+            int n = 0;
+            foreach (var go in sm.GetRootGameObjects())
+            {
+                foreach (var r in go.GetComponentsInChildren(rotType, true))
+                {
+                    var mb = r as MonoBehaviour;
+                    if (mb != null && mb.enabled)
+                    {
+                        Undo.RecordObject(mb, "Disable LccInteractiveRotator");
+                        mb.enabled = false;
+                        EditorUtility.SetDirty(mb);
+                        n++;
+                    }
+                }
+            }
+            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(sm);
+            Debug.Log($"[Disable Rot] {n}개 LccInteractiveRotator 비활성. Play 모드 마우스 입력으로 splat 회전 안 됨.");
         }
 
         [MenuItem("Tools/Lcc Drop Forge/Scene · ⚠ Reset ALL Splat positions to (0,0,0) — destructive (정합 깨짐 주의)")]
