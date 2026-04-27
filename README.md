@@ -13,7 +13,7 @@ XGrids **LCC (Lixel CyberColor) 3D Gaussian Splatting** 파일을 Unity에 **고
 
 | 항목 | 버전 / 값 |
 |---|---|
-| **Unity** | **6000.0.69f1** (Unity 6 LTS) |
+| **Unity** | **6000.3.10f1** (Unity 6) |
 | **Render Pipeline** | **URP 17.3.0** (Universal Render Pipeline) |
 | **Color Space** | Linear |
 | **HDR ColorGrading** | On (`PC_RPAsset.m_ColorGradingMode = 1`) |
@@ -251,7 +251,7 @@ cd "point_cloude"
 # 3. splat-transform 설치
 npm install -g @playcanvas/splat-transform
 
-# 4. Unity 6 (6000.0.69f1) 로 프로젝트 열기 → 자동 import
+# 4. Unity 6 (6000.3.10f1) 로 프로젝트 열기 → 자동 import
 
 # 5. URP RendererFeature 등록 (한 번만)
 #    Tools > Lcc Drop Forge > Aras-P · Register URP RendererFeature
@@ -270,6 +270,3 @@ npm install -g @playcanvas/splat-transform
 - **com.virnect.lcc** — Virnect 내부 SDK
 - **LCC Drops** (`Assets/LCC_Drops/ShinWon_*`) — Virnect 사내 자산
 
----
-
-*Generated 2026-04-27. Detailed work history: `C:\Users\VIRNECT\Desktop\lcc\history\2026-04-27_LCC_AraSp_Migration_and_ICP.txt`*
