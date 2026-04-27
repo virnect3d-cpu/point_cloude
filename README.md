@@ -172,10 +172,6 @@ EditorPref 로 보존 (`LccDropForge.Scene5.PlayerSpawn{X,Y,Z}`). 사용자가 V
 3. **A/B 비교 (Scene4_AB_Compare)** — Virnect SDK 흰/회색 흐릿 vs Aras-P 베이지/금속 디테일 + 표면 텍스처
 4. **Scene2 의 5개 Splat 모두 Aras-P 화** — `_ArasP` child 패턴 (parent rotation 보존, child world identity)
 
-### 새 LCC 추가 (G:\)
-- 기존 3개 (1st_Cutter, Facility_01, Middle) byte-perfect 같음 (G:\와 Assets 비교)
-- 새 2개 (Facility_02, Facility_03) 추가 → splat-transform → Aras-P asset 빌드 → ICP 자동 정합
-
 ### 자동 콜라이더 + 자동 spawn
 - `LccDropAutoImporter` 에 `_AutoSpawnInActiveScene` hook
 - Splat_<name> + `__LccCollider` (proxy mesh) + `_ArasP` (GS renderer) 한 번에
