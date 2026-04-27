@@ -21,11 +21,26 @@ namespace LccDropForge
             set => EditorPrefs.SetBool(kAutoSpawnPref, value);
         }
 
+        // LCC 변환 단계에서 좌/우가 반전되어 들어오는 케이스 보정 — Splat root의 localScale.x = -1
+        const string kForceFlipPref = "LccDropForge.ForceHorizontalFlipOnImport";
+        public static bool ForceHorizontalFlipOnImport
+        {
+            get => EditorPrefs.GetBool(kForceFlipPref, true);
+            set => EditorPrefs.SetBool(kForceFlipPref, value);
+        }
+
         [MenuItem("Tools/Lcc Drop Forge/Settings · Toggle auto-spawn on .lcc import")]
         static void ToggleAutoSpawn()
         {
             AutoSpawnOnImport = !AutoSpawnOnImport;
             Debug.Log($"[LccDropForge] AutoSpawnOnImport = {AutoSpawnOnImport}");
+        }
+
+        [MenuItem("Tools/Lcc Drop Forge/Settings · Toggle force horizontal flip on .lcc import")]
+        static void ToggleForceFlip()
+        {
+            ForceHorizontalFlipOnImport = !ForceHorizontalFlipOnImport;
+            Debug.Log($"[LccDropForge] ForceHorizontalFlipOnImport = {ForceHorizontalFlipOnImport}");
         }
 
         static readonly Queue<string> s_Pending = new();
@@ -172,6 +187,9 @@ namespace LccDropForge
             var splatGO = new GameObject(spawnName);
             splatGO.transform.position = Vector3.zero;
             splatGO.transform.rotation = Quaternion.Euler(-180f, 0f, 0f);
+            // LCC 변환에서 좌우가 반전되어 들어오는 보정 — 토글 시 localScale.x = -1
+            if (ForceHorizontalFlipOnImport)
+                splatGO.transform.localScale = new Vector3(-1f, 1f, 1f);
             Undo.RegisterCreatedObjectUndo(splatGO, "Auto-spawn LCC Splat root");
 
             // 2) __LccCollider — 백엔드 /api/mesh-collider 호출 (XGrids proxy mesh 사용 안 함)
