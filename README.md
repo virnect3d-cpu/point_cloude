@@ -74,10 +74,10 @@ XGrids **LCC (Lixel CyberColor) 3D Gaussian Splatting** 파일을 Unity에 **고
 ### Hierarchy
 ```
 LccGroup                                 (transform identity, parent)
-  ├─ Splat_ShinWon_1st_Cutter            (사용자 수동 정합 회전)
+  ├─ Splat_ShinWon_1st_Cutter            (position=(0,0,0), localScale=(-1,1,1), 수동 정합 회전, Rotator OFF)
   │   ├─ __LccCollider                   (MeshCollider, proxy mesh — Y-up 변환, world identity)
   │   └─ _ArasP                          (GaussianSplatRenderer + Aras-P asset)
-  ├─ Splat_ShinWon_Facility_01           ← 동일 패턴
+  ├─ Splat_ShinWon_Facility_01           ← 동일 패턴 (5개 모두 좌우 플립 + 위치 고정 + Rotator OFF)
   ├─ Splat_ShinWon_Facility_02
   ├─ Splat_ShinWon_Facility_03
   └─ Splat_ShinWon_Facility_Middle
@@ -88,6 +88,8 @@ Player_VBot                              (ThirdPersonController_LITE prefab)
 Cam_VBot                                 (vThirdPersonCamera, target=Player_VBot)
 Directional Light                        (intensity 2.5)
 ```
+
+> Transform baseline (수동으로 잡힌 회전 + 좌우 플립 사유)은 [`Docs/lcc-alignment-issues.md`](Docs/lcc-alignment-issues.md) 참조.
 
 ### Spawn 위치
 EditorPref 로 보존 (`LccDropForge.Scene5.PlayerSpawn{X,Y,Z}`). 사용자가 V-Bot 옮긴 후 `Tools/Lcc Drop Forge/Scene5 · Save current Player_VBot pos as default spawn` 메뉴로 명시 저장 가능.
@@ -100,6 +102,7 @@ EditorPref 로 보존 (`LccDropForge.Scene5.PlayerSpawn{X,Y,Z}`). 사용자가 V
 | 메뉴 | 동작 |
 |---|---|
 | `Settings · Toggle auto-spawn on .lcc import` | 새 .lcc 드롭 시 자동 spawn 토글 (default ON) |
+| `Settings · Toggle force horizontal flip on .lcc import` | 새 .lcc 임포트 시 Splat root에 `localScale.x = -1` 강제 적용 (default ON — LCC 변환 단계 좌우 반전 보정용. 자세한 내용은 [`Docs/lcc-alignment-issues.md`](Docs/lcc-alignment-issues.md)) |
 | `Reimport Selected .lcc` | Selection 의 .lcc 재import |
 | `Process All LCC in LCC_Drops` | 폴더 내 모든 .lcc 일괄 처리 |
 
@@ -188,12 +191,12 @@ EditorPref 로 보존 (`LccDropForge.Scene5.PlayerSpawn{X,Y,Z}`). 사용자가 V
 - 머티리얼 BaseColor 흰색 + Lighting 강화 + receiveShadows off
 - spawn 위치 EditorPref 보존
 
-### 알고리즘 자료 정리
-프로젝트와 별도로 `~/.claude/skills/point-cloud-algorithms/SKILL.md` 에 추가:
-- Registration: ICP/GICP/NDT/RANSAC/TEASER++/GeoTransformer/FCGF/KISS-ICP
-- LiDAR odometry: LOAM/LeGO-LOAM/CT-ICP/KISS-ICP/MULLS/LIO-SAM/FAST-LIO
-- Tracking: PointPillars + SimpleTrack/AB3DMOT, RaTrack (class-agnostic), 4D-PLS
-- Navigation: OctoMap/VDB/Voxblox/NVBlox, A*/RRT*/D* Lite, NavMesh + LCC 콜리전 통합
+### Scene5 Splat 정합 보정 (수동 + 자동화 일부)
+- LCC 변환 단계에서 좌/우가 반전되어 들어오는 케이스 발견 → 5개 Splat 모두 `localScale.x = -1` 적용
+- 임포트 시 자동 보정 옵션 추가: `LccDropForge.ForceHorizontalFlipOnImport` (default ON, 메뉴로 토글 가능)
+- `LccInteractiveRotator` (Edit 모드 마우스 회전) 가 `requireSelection=false` 인스턴스에서 우발 회전 일으키는 이슈 발견 → 5개 모두 `enabled=false`
+- 5개 모두 `position=(0,0,0)` 로 고정 (위치 흔들림 차단)
+- 자세한 이슈/원인/baseline 값/향후 개선안: [`Docs/lcc-alignment-issues.md`](Docs/lcc-alignment-issues.md)
 
 ---
 
