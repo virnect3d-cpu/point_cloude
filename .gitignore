@@ -20,6 +20,11 @@ LCC/**/environment.bin
 LCC/**/collision.lci
 LCC/**/*.ply
 
+# 출력 산출물 / 스크린샷 — 다시 들어오지 않게 차단
+__pco_output/
+__screenshot_*.png
+__v*.png
+
 # Python ──
 __pycache__/
 *.pyc
