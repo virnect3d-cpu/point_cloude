@@ -28,6 +28,9 @@ namespace Virnect.Lcc.Editor
             // 우리가 관심 있는 씬만
             if (!scene.name.StartsWith("Scene5_LccRotate")) return;
             if (SessionState.GetBool(PrefSkipKey, false)) return;
+            // batch mode (CLI -executeMethod) 에서는 다이얼로그 띄우지 않음.
+            // 호출자가 LccColliderBuilder.BakeScene 을 직접 부르도록 위임.
+            if (Application.isBatchMode) return;
 
             // 한 프레임 뒤에 처리 (씬 객체가 다 hydrate 된 후)
             EditorApplication.delayCall += () =>
