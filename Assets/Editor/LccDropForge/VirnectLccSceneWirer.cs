@@ -906,6 +906,85 @@ namespace LccDropForge
             Debug.Log($"[Diag] {splat.name}\n  parent.rot={splat.transform.eulerAngles}  parent.pos={splat.transform.position}\n  Aras-P bounds (asset local) center={arasB?.center} size={arasB?.size}\n  Proxy mesh local center={proxyLocal?.center} size={proxyLocal?.size}\n  Proxy mesh WORLD center={proxyWorld?.center} size={proxyWorld?.size}\n  → 일치 여부: center 차={(arasB.HasValue && proxyLocal.HasValue ? (arasB.Value.center - proxyLocal.Value.center).ToString() : "n/a")}");
         }
 
+        [MenuItem("Tools/Lcc Drop Forge/Collider · BAKE v3 · convert + save mesh asset (efficient, permanent)")]
+        static void DevBakeColliderMeshAsset()
+        {
+            const string outFolder = "Assets/LCC_Generated";
+            System.IO.Directory.CreateDirectory(outFolder);
+
+            var sm = UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene();
+            int n = 0, reused = 0;
+
+            void BakeOne(GameObject splat)
+            {
+                if (splat == null || !splat.name.StartsWith("Splat_") || splat.name.StartsWith("Splat_ArasP_")) return;
+
+                string lccName = splat.name.Substring("Splat_".Length);
+                string assetPath = $"{outFolder}/{lccName}_ColliderYup.asset";
+
+                Mesh bakedMesh = AssetDatabase.LoadAssetAtPath<Mesh>(assetPath);
+                if (bakedMesh == null)
+                {
+                    var lcc = _FindLccSceneByName(lccName);
+                    if (lcc == null) { Debug.LogWarning($"[Bake v3] {splat.name}: LccScene 없음"); return; }
+                    var plyPath = lcc.ResolveProxyMeshPlyAssetPath();
+                    if (string.IsNullOrEmpty(plyPath) || !System.IO.File.Exists(System.IO.Path.GetFullPath(plyPath)))
+                    { Debug.LogWarning($"[Bake v3] {splat.name}: proxy PLY 없음"); return; }
+
+                    Mesh srcMesh;
+                    try { srcMesh = Virnect.Lcc.LccMeshPlyLoader.Load(System.IO.Path.GetFullPath(plyPath)); }
+                    catch (System.Exception e) { Debug.LogError($"[Bake v3] {splat.name} PLY load 실패: {e.Message}"); return; }
+                    if (srcMesh == null) return;
+
+                    // Z-up → Y-up 변환 + asset 으로 저장 (한 번 굽고 영구 사용)
+                    bakedMesh = _ConvertZupToYupMesh(srcMesh, lccName);
+                    bakedMesh.hideFlags = HideFlags.None;   // asset 저장 위해 normal flag
+                    AssetDatabase.CreateAsset(bakedMesh, assetPath);
+                    AssetDatabase.SaveAssets();
+                    Debug.Log($"[Bake v3] {splat.name}: 새 mesh asset 저장 → {assetPath} ({bakedMesh.vertexCount:N0} verts)");
+                    n++;
+                }
+                else
+                {
+                    Debug.Log($"[Bake v3] {splat.name}: 기존 mesh asset 재사용 → {assetPath}");
+                    reused++;
+                }
+
+                // __LccCollider child + MeshCollider 보장
+                var colTr = splat.transform.Find("__LccCollider");
+                GameObject colGO;
+                if (colTr == null)
+                {
+                    colGO = new GameObject("__LccCollider");
+                    colGO.transform.SetParent(splat.transform, false);
+                    Undo.RegisterCreatedObjectUndo(colGO, "Add __LccCollider");
+                    colTr = colGO.transform;
+                }
+                else colGO = colTr.gameObject;
+
+                // 옵션 B+C: localRotation = Inverse(parent) → world identity (mesh 자체가 변환된 Y-up이므로 Aras-P와 같은 좌표계)
+                Undo.RecordObject(colTr, "Bake v3 transform");
+                colTr.localPosition = Vector3.zero;
+                colTr.localRotation = Quaternion.Inverse(splat.transform.rotation);
+                colTr.localScale = Vector3.one;
+
+                var mc = colGO.GetComponent<MeshCollider>();
+                if (mc == null) mc = colGO.AddComponent<MeshCollider>();
+                mc.sharedMesh = bakedMesh;
+                mc.convex = false;
+                mc.enabled = true;
+                EditorUtility.SetDirty(colGO);
+                EditorUtility.SetDirty(mc);
+            }
+
+            foreach (var go in sm.GetRootGameObjects()) BakeOne(go);
+            var grp = System.Array.Find(sm.GetRootGameObjects(), r => r != null && r.name == "LccGroup");
+            if (grp != null) foreach (Transform t in grp.transform) BakeOne(t.gameObject);
+
+            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(sm);
+            Debug.Log($"[Bake v3] 완료 — 새 baked={n}, 재사용={reused}. transform 만져도 안 깨짐 (mesh asset 영구 저장됨)");
+        }
+
         [MenuItem("Tools/Lcc Drop Forge/Collider · FIX v2 · convert proxy mesh Z-up→Y-up + world identity (perfect align)")]
         static void DevFixColliderProperAlign()
         {
