@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -108,6 +108,10 @@ class LccCompareResponse(BaseModel):
     p90: float
     p99: float
     elapsed_sec: float
+    # Hausdorff 시각화용 — A→B 거리 히스토그램 (Editor/웹 UI 차트)
+    hist_bins:   Optional[List[float]] = None    # bin edges (길이 = bins+1)
+    hist_counts: Optional[List[int]]   = None    # count per bin (길이 = bins)
+    mean:        Optional[float]       = None    # 평균 거리
 
 
 def _read_ply_vertices(path: Path):
@@ -140,7 +144,22 @@ def compare(req: LccCompareRequest):
         lcc_pos, _, _, _ = lcc_loader.decode_lod(d, req.lod, with_scale=False, with_opacity=False)
         ref_v = _read_ply_vertices(ref)
         r = lcc_compare.compare_pointclouds(lcc_pos, ref_v,
-                                             sample_a=req.sample, sample_b=req.sample)
+                                             sample_a=req.sample, sample_b=req.sample,
+                                             keep_per_point=True)
+        # 거리 히스토그램 (24 bin, 0..p99 범위 — 꼬리 외곽치 표시 영향 줄임)
+        hist_bins  = None
+        hist_count = None
+        mean_d     = None
+        if r.distances_a is not None and len(r.distances_a) > 0:
+            import numpy as _np
+            d = _np.asarray(r.distances_a, dtype=_np.float32)
+            top = float(r.percentiles_ab.get("p99", float(d.max())))
+            top = max(top, 1e-6)
+            counts, edges = _np.histogram(d, bins=24, range=(0.0, top))
+            hist_bins  = [float(x) for x in edges.tolist()]
+            hist_count = [int(x)   for x in counts.tolist()]
+            mean_d     = float(d.mean())
+
         return LccCompareResponse(
             n_lcc=r.n_a, n_ref=r.n_b,
             chamfer_symmetric=r.chamfer,
@@ -150,6 +169,9 @@ def compare(req: LccCompareRequest):
             p90=r.percentiles_ab["p90"],
             p99=r.percentiles_ab["p99"],
             elapsed_sec=r.elapsed_sec,
+            hist_bins=hist_bins,
+            hist_counts=hist_count,
+            mean=mean_d,
         )
     except HTTPException:
         raise

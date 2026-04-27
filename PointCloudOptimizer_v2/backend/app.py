@@ -19,7 +19,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import numpy as np
 from fastapi import FastAPI, File, Request, UploadFile, HTTPException
@@ -256,6 +256,51 @@ async def upload_path(request: Request):
         "has_normals": normals is not None,
         "has_colors":  colors is not None,
         "size_bytes": len(data),
+    }
+
+
+# ── LCC 직접 입력 (data.bin → 점군) ────────────────────────────────────────
+# XGrids proxy mesh-files/*.ply 가 본체 일부만 담아 콜라이더가 작게 잘리는 문제의
+# 해결책. .lcc 디렉토리를 받아 data.bin 의 실제 splat 점을 LOD 별로 추출.
+@app.post("/api/upload-lcc")
+async def upload_lcc(request: Request):
+    """JSON body: {"path": "<lcc-dir-or-.lcc-file>", "lod": int=0, "max_points": int|null}
+
+    응답은 /api/upload-path 와 동일한 스키마 (session_id 등) — 이후 /api/mesh-collider
+    같은 엔드포인트가 그대로 동작.
+    """
+    body = await request.json()
+    raw_path  = body.get("path", "")
+    lod       = int(body.get("lod", 0))
+    max_pts   = body.get("max_points")
+    if max_pts is not None:
+        max_pts = int(max_pts)
+
+    try:
+        from backend.core import lcc_extract
+        pts, colors, meta = lcc_extract.extract_lod(raw_path, lod=lod, max_points=max_pts)
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"LCC 추출 실패: {e}")
+
+    if len(pts) < 4:
+        raise HTTPException(422, "LCC 추출 결과가 4점 미만")
+
+    fname = f"{meta['name']}_LOD{meta['lod']}.lcc"
+    sid = _new_session(pts, None, fname, colors=colors)
+    bb_min = pts.min(axis=0).tolist()
+    bb_max = pts.max(axis=0).tolist()
+    return {
+        "session_id":  sid,
+        "point_count": len(pts),
+        "filename":    fname,
+        "bbox":        {"min": bb_min, "max": bb_max},
+        "has_normals": False,
+        "has_colors":  True,
+        "lcc_meta":    meta,
     }
 
 
@@ -997,9 +1042,24 @@ async def mesh_collider(
     instant_meshes: bool = False, # IM 리토폴로지 (토폴로지 균일화)
     im_target_faces: int = 2000,  # IM 목표 면 수
     im_pure_quad: bool = False,   # 콜라이더는 tri로 써야 하니 기본 False
+    flat: bool = False,           # True → Unity JsonUtility 친화 평탄 배열 응답
+    format: str = "json",         # json | obj — obj 면 OBJ 텍스트로 다운로드
 ):
     """page 2: 포인트 클라우드에 실제로 밀착하는 메쉬 콜라이더 생성.
-    Convex Hull보다 훨씬 정확 — 오목한 영역까지 따라감."""
+    Convex Hull보다 훨씬 정확 — 오목한 영역까지 따라감.
+
+    flat=true 일 때 응답:
+      {
+        "mode": "mesh"|"convex_parts",
+        "verts_flat": [x,y,z, x,y,z, ...],   ← 길이 = verts_total * 3
+        "tris_flat":  [a,b,c, a,b,c, ...],   ← 길이 = tris_total  * 3 (모든 part 머지)
+        "verts_total": int, "tris_total": int,
+      }
+    convex_parts 모드여도 머지된 단일 메쉬로 반환되므로 Unity 측은 단일 MeshCollider 로 사용.
+
+    format=obj 일 때 — 모든 part 머지한 단일 OBJ 텍스트(.obj) 다운로드.
+    Blender/MeshLab/Unity AssetImporter 등 표준 툴에서 바로 열 수 있음.
+    """
     s = _sessions.get(sid)
     if not s:
         raise HTTPException(404, "세션을 찾을 수 없습니다")
@@ -1041,7 +1101,57 @@ async def mesh_collider(
     except Exception as e:
         raise HTTPException(500, f"메쉬 콜라이더 생성 실패: {e}")
 
+    if format.lower() == "obj":
+        merged_v, merged_t = _merge_collider_parts(result)
+        obj_text = _mesh_to_obj(merged_v, merged_t,
+                                comment=f"collider · {len(merged_v)} verts · {len(merged_t)} tris · sid={sid}")
+        base = _safe_stem(str(s.get("filename", "collider")))
+        return Response(
+            content=obj_text,
+            media_type="text/plain",
+            headers={"Content-Disposition": f'attachment; filename="{base}_collider.obj"'},
+        )
+
+    if flat:
+        merged_v, merged_t = _merge_collider_parts(result)
+        return {
+            "mode": result.get("mode", "mesh"),
+            "verts_flat": merged_v.reshape(-1).tolist() if merged_v.size else [],
+            "tris_flat":  merged_t.reshape(-1).tolist() if merged_t.size else [],
+            "verts_total": int(result.get("verts_total", len(merged_v))),
+            "tris_total":  int(result.get("tris_total",  len(merged_t))),
+        }
+
     return result
+
+
+# ── collider helper: parts → 단일 (verts, tris) 머지 ──────────────────────
+def _merge_collider_parts(result: dict):
+    all_v: List[np.ndarray] = []
+    all_t: List[np.ndarray] = []
+    v_offset = 0
+    for p in result.get("parts", []) or []:
+        v = np.asarray(p["vertices"], dtype=np.float32).reshape(-1, 3)
+        t = np.asarray(p["triangles"], dtype=np.int32).reshape(-1, 3) + v_offset
+        all_v.append(v)
+        all_t.append(t)
+        v_offset += len(v)
+    if not all_v:
+        return np.zeros((0, 3), dtype=np.float32), np.zeros((0, 3), dtype=np.int32)
+    return np.concatenate(all_v, axis=0), np.concatenate(all_t, axis=0)
+
+
+def _mesh_to_obj(verts: np.ndarray, tris: np.ndarray, comment: str = "") -> str:
+    lines: List[str] = ["# generated by PointCloudOptimizer v2 — mesh-collider"]
+    if comment:
+        lines.append(f"# {comment}")
+    for v in verts:
+        lines.append(f"v {v[0]:.6f} {v[1]:.6f} {v[2]:.6f}")
+    # OBJ는 1-base 인덱스
+    for t in tris:
+        lines.append(f"f {int(t[0])+1} {int(t[1])+1} {int(t[2])+1}")
+    lines.append("")
+    return "\n".join(lines)
 
 
 # ── Mesh download ──────────────────────────────────────────────────────────

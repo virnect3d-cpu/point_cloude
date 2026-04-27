@@ -1149,6 +1149,44 @@ window.addEventListener('keydown', e => {
   }
 });
 
+// Page 2 에서 메쉬 콜라이더 OBJ 로 다운로드 (Blender/MeshLab 검증용)
+async function p2DownloadColliderObj(){
+  const sid = App.autoSessionId || (window.P2 && P2.activeSid);
+  if(!sid){ appNotify('세션이 없습니다 — 먼저 파이프라인 또는 자동 콜라이더 생성을 실행하세요.'); return; }
+  try{
+    // page2-collider 의 현재 토글 값 사용 — 아니면 백엔드 디폴트
+    const method   = document.getElementById('mc-method')?.value || 'poisson';
+    const depth    = +(document.getElementById('mc-depth')?.value   || 8);
+    const target   = +(document.getElementById('mc-target')?.value  || 4000);
+    const prune    = +(document.getElementById('mc-prune')?.value   || 4.0);
+    const trim     = +(document.getElementById('mc-trim')?.value    || 8) / 100;
+    const keep     = !!(document.getElementById('mc-keep-frag')?.checked);
+    const q = new URLSearchParams({
+      method, depth, target_tris:target, snap:2,
+      max_edge_ratio: prune.toFixed(2),
+      density_trim:   trim.toFixed(3),
+      keep_fragments: keep,
+      format: 'obj',
+    });
+    const r = await fetch(`/api/mesh-collider/${sid}?${q}`);
+    if(!r.ok) throw new Error(`서버 오류 ${r.status}`);
+    const text = await r.text();
+    const stem = (P3.loadedFileName || 'mesh').replace(/\.[^.]+$/,'').replace(/[^\w\-]/g,'_');
+    const fname = `${stem}_collider.obj`;
+    const api = await getPyApi();
+    if(api){
+      const rr = await api.save_file_dialog(fname, text);
+      if(rr && rr.ok){ appNotify('✅ OBJ 저장:\n' + rr.path); }
+      else if(rr && rr.reason !== 'cancelled'){ appNotify('저장 실패: '+rr.reason); }
+      return;
+    }
+    const blob = new Blob([text], {type:'text/plain'});
+    await saveBlob(fname, blob);
+  }catch(e){
+    appNotify('OBJ 다운로드 실패: ' + e.message);
+  }
+}
+
 // Page 2에서 자동 콜라이더 JSON 다운로드
 async function p2DownloadAutoCollider(){
   if(!App.autoSessionId){ appNotify('자동 파이프라인 결과가 없습니다.'); return; }

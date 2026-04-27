@@ -43,6 +43,38 @@ namespace Virnect.Lcc.Editor
 
         [Serializable] public class UploadResp { public string session_id; public int point_count; }
 
+        // ── POST /api/upload-lcc — LCC 디렉토리(또는 .lcc 파일)에서 LOD 추출 → sid ─
+        // XGrids proxy mesh 가 작아 콜라이더 잘리는 문제 회피용 — data.bin 의 실제 splat 점을 사용.
+        public static void UploadLccPath(string lccDirOrFile, int lod, int maxPoints,
+                                         Action<string, string> onDone)
+        {
+            string path = lccDirOrFile.Replace("\\", "/");
+            string payload = maxPoints > 0
+                ? $"{{\"path\":\"{path}\",\"lod\":{lod},\"max_points\":{maxPoints}}}"
+                : $"{{\"path\":\"{path}\",\"lod\":{lod}}}";
+            var req = new UnityWebRequest(BaseUrl + "/api/upload-lcc", "POST");
+            req.uploadHandler   = new UploadHandlerRaw(Encoding.UTF8.GetBytes(payload));
+            req.downloadHandler = new DownloadHandlerBuffer();
+            req.SetRequestHeader("Content-Type", "application/json");
+            req.timeout = 600;
+            var op = req.SendWebRequest();
+            op.completed += _ =>
+            {
+                try
+                {
+                    if (req.result != UnityWebRequest.Result.Success)
+                    {
+                        onDone?.Invoke(null, $"HTTP {req.responseCode}: {req.downloadHandler.text}");
+                        return;
+                    }
+                    var d = JsonUtility.FromJson<UploadResp>(req.downloadHandler.text);
+                    onDone?.Invoke(d.session_id, null);
+                }
+                catch (Exception e) { onDone?.Invoke(null, e.Message); }
+                finally { req.Dispose(); }
+            };
+        }
+
         // ── POST JSON body → 스트리밍 SSE 읽기 (Editor 는 비동기) ────────
         /// returns last parsed event dict (last "data:" line) via callback
         public static void PostJsonReadSse(string url, string jsonBody,

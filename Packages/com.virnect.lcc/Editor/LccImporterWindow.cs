@@ -462,9 +462,67 @@ namespace Virnect.Lcc.Editor
                         using (new EditorGUI.DisabledScope(true))
                             EditorGUILayout.TextArea(_cmpResult, GUILayout.MinHeight(90));
                     }
+
+                    if (_cmpHistCounts != null && _cmpHistCounts.Length > 0)
+                    {
+                        EditorGUILayout.Space(4);
+                        EditorGUILayout.LabelField("거리 분포 (A→B, 0..p99)", EditorStyles.miniBoldLabel);
+                        _DrawHistogram(_cmpHistBins, _cmpHistCounts, _cmpP50, _cmpP90, _cmpP99);
+                    }
                 }
             }
             EditorGUILayout.Space(2);
+        }
+
+        // ── Hausdorff 히스토그램 렌더링 ────────────────────────────────────
+        float[] _cmpHistBins;
+        int[]   _cmpHistCounts;
+        float   _cmpP50, _cmpP90, _cmpP99;
+
+        void _DrawHistogram(float[] bins, int[] counts, float p50, float p90, float p99)
+        {
+            const float h = 90f;
+            var rect = GUILayoutUtility.GetRect(0, h, GUILayout.ExpandWidth(true));
+            EditorGUI.DrawRect(rect, new Color(0.12f, 0.12f, 0.12f, 1f));
+
+            int n = counts.Length;
+            if (n == 0 || bins == null || bins.Length < 2) return;
+            int maxC = 1;
+            foreach (var c in counts) if (c > maxC) maxC = c;
+            float xMin = bins[0], xMax = bins[bins.Length - 1];
+            float xRange = Mathf.Max(1e-6f, xMax - xMin);
+
+            float w = rect.width / n;
+            // 막대
+            for (int i = 0; i < n; i++)
+            {
+                float frac = counts[i] / (float)maxC;
+                float bh   = Mathf.Max(1f, frac * (h - 14f));
+                var bar = new Rect(rect.x + i * w, rect.yMax - bh - 2, Mathf.Max(1f, w - 1f), bh);
+                EditorGUI.DrawRect(bar, new Color(0.55f, 0.82f, 1.00f, 0.85f));  // kAccent
+            }
+
+            // 퍼센타일 마커 (p50/p90/p99)
+            DrawMarker(rect, xMin, xRange, p50, new Color(0.4f, 1f, 0.4f, 0.9f), "p50");
+            DrawMarker(rect, xMin, xRange, p90, new Color(1f, 0.85f, 0.3f, 0.9f), "p90");
+            DrawMarker(rect, xMin, xRange, p99, new Color(1f, 0.4f, 0.4f, 0.9f), "p99");
+
+            // x축 레이블
+            var lblStyle = new GUIStyle(EditorStyles.miniLabel) { normal = { textColor = new Color(0.7f,0.7f,0.7f) } };
+            GUI.Label(new Rect(rect.x, rect.yMax - 12, 60, 12), $"0", lblStyle);
+            var rightStyle = new GUIStyle(lblStyle) { alignment = TextAnchor.MiddleRight };
+            GUI.Label(new Rect(rect.xMax - 80, rect.yMax - 12, 78, 12), $"{xMax:F3}m", rightStyle);
+        }
+
+        static void DrawMarker(Rect rect, float xMin, float xRange, float val, Color col, string label)
+        {
+            if (val <= xMin) return;
+            float t = Mathf.Clamp01((val - xMin) / xRange);
+            float x = rect.x + t * rect.width;
+            EditorGUI.DrawRect(new Rect(x, rect.y, 1.5f, rect.height), col);
+            var st = new GUIStyle(EditorStyles.miniLabel)
+            { normal = { textColor = col }, alignment = TextAnchor.UpperLeft };
+            GUI.Label(new Rect(x + 2, rect.y, 36, 12), label, st);
         }
 
         // ════════════════════════════════════════════════════════════════
@@ -568,6 +626,25 @@ namespace Virnect.Lcc.Editor
         int  _colliderDepth = 7;
         int  _colliderTargetTris = 3000;
 
+        // Bulk regen — LccGroup 의 모든 Splat 자식에 대해 백엔드 콜라이더 재생성
+        GameObject _bulkColRoot;
+        string _bulkColPlyDir = "";
+        int    _bulkColTargetTris = 8000;
+        int    _bulkColDepth = 8;
+        bool   _bulkColKeepAll = true;          // density_trim=0, keep_fragments=true, max_edge_ratio=0
+        bool   _bulkColZupToYup = true;         // XGrids/photogrammetry PLY 좌표계 보정
+        bool   _bulkColShowMesh = true;         // 디버그용 MeshRenderer 추가
+        bool   _bulkColReplaceExisting = true;  // 기존 __LccCollider 자식 제거
+        bool   _bulkColAutoClear = true;        // 재생성 전에 자동 정리
+        bool   _bulkColClearAssets = false;     // 자동 정리 시 캐시 .asset 까지 삭제
+        int    _bulkColRunId = 0;               // 취소/덮어쓰기용 generation counter
+
+        // 입력 소스 — XGrids proxy PLY 가 작은 경우 splat 본체를 직접 추출
+        enum BulkColSource { ProxyPly, LccSplat }
+        BulkColSource _bulkColSource = BulkColSource.LccSplat;
+        int _bulkColLod = 1;          // LCC LOD 레벨 (0 = 풀, 1~4 = 점차 다운샘플)
+        int _bulkColMaxPts = 200000;  // 콜라이더 입력으로 충분 (Poisson 처리 시간 ↓)
+
         void _ColliderTab()
         {
             EditorGUILayout.LabelField("🎮 유니티 메쉬 콜라이더 (v1 page 2)", EditorStyles.boldLabel);
@@ -592,6 +669,7 @@ namespace Virnect.Lcc.Editor
                 if (GUILayout.Button("웹 UI 에서 2페이지 열기 (수동 박스 드래그)", GUILayout.Height(22)))
                     Application.OpenURL(LccServerManager.BaseUrl + "/");
             }
+            _BulkColliderSection();
             _V1LogBox();
         }
 
@@ -628,6 +706,433 @@ namespace Virnect.Lcc.Editor
                     } finally { req.Dispose(); _V1SetBusy(false); }
                 };
             });
+        }
+
+        // ──────── 🔁 BULK COLLIDER REGEN ────────────────────────────────
+        // 대상 루트 (예: LccGroup) 의 모든 자식 (각 자식 = Splat_* 그룹) 에 대해
+        // 백엔드 /api/mesh-collider 로 콜라이더를 재생성한 뒤, 자식의 __LccCollider 를 교체.
+        void _BulkColliderSection()
+        {
+            EditorGUILayout.Space(8);
+            EditorGUILayout.LabelField("🔁 그룹 일괄 재생성 (XGrids 콜라이더 → 백엔드 메쉬-콜라이더)",
+                EditorStyles.boldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                _bulkColRoot = (GameObject)EditorGUILayout.ObjectField(
+                    new GUIContent("대상 루트",
+                        "이 GameObject 의 모든 자식 (각 자식 = 하나의 Splat 그룹) 에 대해 콜라이더 재생성. 보통 LccGroup."),
+                    _bulkColRoot, typeof(GameObject), true);
+
+                _bulkColSource = (BulkColSource)EditorGUILayout.EnumPopup(
+                    new GUIContent("입력 소스",
+                        "ProxyPly: mesh-files/*.ply (XGrids 자동 동봉, 작을 수 있음)\n" +
+                        "LccSplat: data.bin 의 실제 splat 점을 LOD 별 추출 — 본체 전체 커버 (권장)"),
+                    _bulkColSource);
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    string label = _bulkColSource == BulkColSource.ProxyPly
+                        ? "소스 PLY 폴더"
+                        : "LCC 루트 폴더 (.lcc 들이 있는 곳)";
+                    _bulkColPlyDir = EditorGUILayout.TextField(
+                        new GUIContent(label,
+                            _bulkColSource == BulkColSource.ProxyPly
+                                ? "각 자식 이름과 매칭되는 .ply 가 있는 폴더 (예: <lcc>/mesh-files)"
+                                : "각 Splat 자식 이름의 LCC 디렉토리들이 들어있는 부모 폴더. " +
+                                  "예: <root>/ShinWon_1st_Cutter/data.bin · <root>/ShinWon_Facility_01/data.bin · ..."),
+                        _bulkColPlyDir);
+                    if (GUILayout.Button("📁", GUILayout.Width(30)))
+                    {
+                        var p = EditorUtility.OpenFolderPanel(label,
+                            string.IsNullOrEmpty(_bulkColPlyDir) ? "" : _bulkColPlyDir, "");
+                        if (!string.IsNullOrEmpty(p)) _bulkColPlyDir = p.Replace("\\", "/");
+                    }
+                }
+
+                if (_bulkColSource == BulkColSource.LccSplat)
+                {
+                    _bulkColLod = EditorGUILayout.IntSlider(
+                        new GUIContent("LCC LOD",
+                            "0 = 최고 해상도 (느림, 큰 메모리), 1~2 = 콜라이더용 권장, 4 = 가장 가벼움"),
+                        _bulkColLod, 0, 4);
+                    _bulkColMaxPts = EditorGUILayout.IntSlider(
+                        new GUIContent("최대 점 개수 (다운샘플)",
+                            "LOD 추출 후 이 개수로 무작위 다운샘플. Poisson 입력은 50~200K 면 충분."),
+                        _bulkColMaxPts, 50000, 1000000);
+                }
+
+                _bulkColDepth      = EditorGUILayout.IntSlider("Poisson depth", _bulkColDepth, 6, 10);
+                _bulkColTargetTris = EditorGUILayout.IntSlider("target 삼각형", _bulkColTargetTris, 1000, 30000);
+
+                _bulkColKeepAll = EditorGUILayout.ToggleLeft(
+                    new GUIContent("전체 보존 모드 (density_trim=0, keep_fragments=true, max_edge_ratio=0)",
+                        "체크 시 백엔드의 공격적 노이즈 제거를 끔 — 흩어진 splat 도 콜라이더에 포함. 건물 전체 덮을 때 ON."),
+                    _bulkColKeepAll);
+                _bulkColZupToYup = EditorGUILayout.ToggleLeft(
+                    new GUIContent("Z-up → Y-up 변환 (XGrids/photogrammetry PLY)",
+                        "PLY 가 Z-up 좌표계인 경우 Unity 의 Y-up 으로 자동 변환. XGrids mesh-files 는 보통 ON."),
+                    _bulkColZupToYup);
+                _bulkColShowMesh = EditorGUILayout.ToggleLeft(
+                    new GUIContent("__LccCollider 에 MeshRenderer 추가 (디버그 시각화)",
+                        "체크 시 콜라이더 메쉬가 씬에 반투명 녹색으로 표시됨."),
+                    _bulkColShowMesh);
+                _bulkColReplaceExisting = EditorGUILayout.ToggleLeft(
+                    new GUIContent("기존 __LccCollider 자식 제거 후 새로 생성",
+                        "체크 해제 시 동명 자식이 있어도 새로 만들지 않고 건너뜀."),
+                    _bulkColReplaceExisting);
+
+                EditorGUILayout.HelpBox(
+                    "각 자식 이름의 'Splat_' 프리픽스를 떼고 폴더에서 동명 .ply 를 찾아 백엔드로 전송. " +
+                    "결과 메쉬는 Assets/LCC_GeneratedColliders/ 에 .asset 으로 저장.",
+                    MessageType.Info);
+
+                bool ready = !_v1Busy && _bulkColRoot != null && !string.IsNullOrEmpty(_bulkColPlyDir);
+                GUI.enabled = ready;
+                var prev = GUI.backgroundColor; GUI.backgroundColor = kAccent;
+                if (GUILayout.Button(_v1Busy ? "⏳ 처리 중..." : "▶ 그룹 콜라이더 일괄 재생성", GUILayout.Height(28)))
+                    _RunBulkColliderRegen();
+                GUI.backgroundColor = prev; GUI.enabled = true;
+            }
+
+            // ── 정리 / 취소 ─────────────────────────────────────────────
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("🧹 정리 · 캐시 비우기", EditorStyles.miniBoldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                _bulkColAutoClear = EditorGUILayout.ToggleLeft(
+                    new GUIContent("재생성 전 자동 정리 (대상 루트 하위 __LccCollider 모두 제거)",
+                        "체크 시 ▶ 버튼 누르면 기존 __LccCollider 들을 먼저 비우고 재생성. 꼬인 상태 방지."),
+                    _bulkColAutoClear);
+                _bulkColClearAssets = EditorGUILayout.ToggleLeft(
+                    new GUIContent("자동 정리에 'Assets/LCC_GeneratedColliders/*.asset' 도 포함",
+                        "체크 시 캐시된 콜라이더 메쉬 에셋과 머티리얼까지 모두 삭제. Stale 참조 100% 제거."),
+                    _bulkColClearAssets);
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    GUI.enabled = _bulkColRoot != null;
+                    if (GUILayout.Button(new GUIContent("씬의 __LccCollider 제거",
+                        "대상 루트 하위 모든 자식의 __LccCollider GameObject 를 삭제."), GUILayout.Height(22)))
+                        _ClearSceneColliders(false);
+                    if (GUILayout.Button(new GUIContent("씬 + 에셋 모두 제거",
+                        "씬의 __LccCollider 와 Assets/LCC_GeneratedColliders/ 의 모든 메쉬·머티리얼 .asset 삭제."),
+                        GUILayout.Height(22)))
+                        _ClearSceneColliders(true);
+                    GUI.enabled = true;
+                }
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    GUI.enabled = _v1Busy;
+                    if (GUILayout.Button(new GUIContent("⏹ 진행 중 작업 취소",
+                        "현재 돌고 있는 일괄 재생성 루프를 중단. 이미 보낸 HTTP 요청 응답은 무시됨."),
+                        GUILayout.Height(22)))
+                        _CancelBulkRegen();
+                    GUI.enabled = true;
+                }
+            }
+        }
+
+        void _ClearSceneColliders(bool alsoAssets)
+        {
+            if (_bulkColRoot == null)
+            {
+                EditorUtility.DisplayDialog("대상 루트 없음", "대상 루트를 먼저 지정하세요.", "OK");
+                return;
+            }
+            int removedGo = 0;
+            foreach (Transform c in _bulkColRoot.transform)
+            {
+                if (c == null) continue;
+                var existing = c.Find("__LccCollider");
+                if (existing == null) continue;
+                // sharedMesh 참조부터 끊어 stale 회피
+                var mc = existing.GetComponent<MeshCollider>();
+                if (mc != null) mc.sharedMesh = null;
+                var mf = existing.GetComponent<MeshFilter>();
+                if (mf != null) mf.sharedMesh = null;
+                Undo.DestroyObjectImmediate(existing.gameObject);
+                removedGo++;
+            }
+
+            int deletedAssets = 0;
+            if (alsoAssets)
+            {
+                const string dir = "Assets/LCC_GeneratedColliders";
+                if (AssetDatabase.IsValidFolder(dir))
+                {
+                    var seen = new HashSet<string>();
+                    foreach (var filter in new[] { "t:Mesh", "t:Material" })
+                    {
+                        var guids = AssetDatabase.FindAssets(filter, new[] { dir });
+                        foreach (var g in guids)
+                        {
+                            var path = AssetDatabase.GUIDToAssetPath(g);
+                            if (string.IsNullOrEmpty(path) || !seen.Add(path)) continue;
+                            if (AssetDatabase.DeleteAsset(path)) deletedAssets++;
+                        }
+                    }
+                    AssetDatabase.SaveAssets();
+                    AssetDatabase.Refresh();
+                }
+            }
+
+            if (string.IsNullOrEmpty(_v1Log)) _v1Log = "";
+            _V1AppendLog($"🧹 정리 — __LccCollider 제거 {removedGo}개" +
+                         (alsoAssets ? $", 캐시 에셋 삭제 {deletedAssets}개" : ""));
+            if (_bulkColRoot.scene.IsValid())
+                UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(_bulkColRoot.scene);
+        }
+
+        void _CancelBulkRegen()
+        {
+            _bulkColRunId++;        // 진행 중 _ProcessNextBulk / 콜백은 mismatch 보고 abort
+            _V1SetBusy(false);
+            _V1AppendLog("⏹ 진행 중 작업 취소됨 (이후 들어오는 HTTP 응답 무시)");
+        }
+
+        void _RunBulkColliderRegen()
+        {
+            if (_bulkColRoot == null) return;
+            if (!Directory.Exists(_bulkColPlyDir))
+            {
+                EditorUtility.DisplayDialog("PLY 폴더 없음",
+                    "다음 폴더가 존재하지 않습니다:\n" + _bulkColPlyDir, "OK");
+                return;
+            }
+            var children = new List<Transform>();
+            foreach (Transform c in _bulkColRoot.transform) children.Add(c);
+            if (children.Count == 0)
+            {
+                EditorUtility.DisplayDialog("자식 없음",
+                    _bulkColRoot.name + " 아래에 자식 GameObject 가 없습니다.", "OK");
+                return;
+            }
+
+            _v1Log = "";
+            if (_bulkColAutoClear) _ClearSceneColliders(_bulkColClearAssets);
+
+            int myRunId = ++_bulkColRunId;
+            _V1AppendLog($"▶ 일괄 재생성 시작 (run #{myRunId}) — 자식 {children.Count}개, 소스: {_bulkColPlyDir}");
+            _V1SetBusy(true);
+            EditorApplication.delayCall += () => _ProcessNextBulk(children, 0, myRunId);
+        }
+
+        void _ProcessNextBulk(List<Transform> children, int idx, int runId)
+        {
+            if (runId != _bulkColRunId)
+            {
+                // 취소되었거나 새 실행으로 덮어써짐
+                return;
+            }
+            if (idx >= children.Count)
+            {
+                _V1AppendLog($"✓ 완료 — {children.Count}개 항목 처리 (run #{runId})");
+                _V1SetBusy(false);
+                AssetDatabase.SaveAssets();
+                AssetDatabase.Refresh();
+                return;
+            }
+            var child = children[idx];
+            if (child == null)
+            {
+                _ProcessNextBulk(children, idx + 1, runId);
+                return;
+            }
+
+            string srcPath = _ResolveSourceForChild(child.name);
+            if (srcPath == null)
+            {
+                _V1AppendLog($"  [{idx + 1}/{children.Count}] {child.name} — 소스 없음 ({_bulkColSource}), 건너뜀");
+                _ProcessNextBulk(children, idx + 1, runId);
+                return;
+            }
+
+            string srcLabel = _bulkColSource == BulkColSource.LccSplat
+                ? $"LCC[{Path.GetFileName(srcPath)}, lod={_bulkColLod}]"
+                : Path.GetFileName(srcPath);
+            _V1AppendLog($"  [{idx + 1}/{children.Count}] {child.name} — 업로드: {srcLabel}");
+
+            Action<string, string> onUpload = (sid, err) =>
+            {
+                if (runId != _bulkColRunId) return;
+                if (err != null)
+                {
+                    _V1AppendLog($"    ❌ upload: {err}");
+                    _ProcessNextBulk(children, idx + 1, runId);
+                    return;
+                }
+
+                string url = LccV1Client.BaseUrl + "/api/mesh-collider/" + sid +
+                             $"?method=poisson&depth={_bulkColDepth}" +
+                             $"&target_tris={_bulkColTargetTris}&snap=2" +
+                             $"&zup_to_yup={(_bulkColZupToYup ? "true" : "false")}" +
+                             (_bulkColKeepAll
+                                 ? "&density_trim=0&keep_fragments=true&max_edge_ratio=0"
+                                 : "") +
+                             "&flat=true";
+
+                var req = UnityWebRequest.Get(url); req.timeout = 600;
+                var op = req.SendWebRequest();
+                op.completed += _ =>
+                {
+                    bool stillCurrent = runId == _bulkColRunId;
+                    try
+                    {
+                        if (!stillCurrent) return;
+                        if (req.result != UnityWebRequest.Result.Success)
+                        {
+                            _V1AppendLog($"    ❌ HTTP {req.responseCode}: {req.downloadHandler.text}");
+                            return;
+                        }
+                        var resp = JsonUtility.FromJson<FlatColliderResponse>(req.downloadHandler.text);
+                        if (resp == null || resp.verts_flat == null || resp.tris_flat == null
+                            || resp.verts_flat.Length < 9 || resp.tris_flat.Length < 3)
+                        {
+                            _V1AppendLog("    ❌ 응답 비어있음 (verts/tris 부족)");
+                            return;
+                        }
+                        _ApplyColliderToChild(child, resp);
+                        _V1AppendLog($"    ✓ V={resp.verts_total} T={resp.tris_total}");
+                    }
+                    catch (Exception e) { if (stillCurrent) _V1AppendLog($"    ❌ {e.Message}"); }
+                    finally
+                    {
+                        req.Dispose();
+                        if (stillCurrent) _ProcessNextBulk(children, idx + 1, runId);
+                    }
+                };
+            };
+
+            if (_bulkColSource == BulkColSource.LccSplat)
+                LccV1Client.UploadLccPath(srcPath, _bulkColLod, _bulkColMaxPts, onUpload);
+            else
+                LccV1Client.UploadPath(srcPath, onUpload);
+        }
+
+        string _ResolveSourceForChild(string childName)
+        {
+            return _bulkColSource == BulkColSource.LccSplat
+                ? _ResolveLccDirForChild(childName)
+                : _ResolvePlyForChild(childName);
+        }
+
+        string _ResolveLccDirForChild(string childName)
+        {
+            // 'Splat_' prefix 떼고 LCC 폴더 후보 검사.
+            string baseName = childName.StartsWith("Splat_") ? childName.Substring(6) : childName;
+            string[] candidates = { baseName, childName, "Splat_" + baseName };
+            foreach (var c in candidates)
+            {
+                var dir = Path.Combine(_bulkColPlyDir, c);
+                if (Directory.Exists(dir) && File.Exists(Path.Combine(dir, "data.bin")))
+                    return dir.Replace("\\", "/");
+                // .lcc 파일 직접 매칭도 시도
+                var lccFile = Path.Combine(_bulkColPlyDir, c + ".lcc");
+                if (File.Exists(lccFile)) return lccFile.Replace("\\", "/");
+            }
+            return null;
+        }
+
+        string _ResolvePlyForChild(string childName)
+        {
+            // 'Splat_' prefix 제거 후 매칭, 그 외 fallback 패턴.
+            string[] candidates;
+            if (childName.StartsWith("Splat_"))
+            {
+                var stripped = childName.Substring(6);
+                candidates = new[] { stripped + ".ply", childName + ".ply" };
+            }
+            else
+            {
+                candidates = new[] { childName + ".ply", "Splat_" + childName + ".ply" };
+            }
+            foreach (var c in candidates)
+            {
+                var p = Path.Combine(_bulkColPlyDir, c);
+                if (File.Exists(p)) return p.Replace("\\", "/");
+            }
+            return null;
+        }
+
+        void _ApplyColliderToChild(Transform parent, FlatColliderResponse resp)
+        {
+            int vc = resp.verts_flat.Length / 3;
+            var verts = new Vector3[vc];
+            for (int i = 0; i < vc; i++)
+                verts[i] = new Vector3(
+                    resp.verts_flat[i * 3 + 0],
+                    resp.verts_flat[i * 3 + 1],
+                    resp.verts_flat[i * 3 + 2]);
+
+            var mesh = new Mesh();
+            if (vc > 65535)
+                mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            mesh.vertices = verts;
+            mesh.triangles = resp.tris_flat;
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            mesh.name = parent.name + "_collider";
+
+            // 메쉬 에셋 저장
+            const string assetDir = "Assets/LCC_GeneratedColliders";
+            if (!AssetDatabase.IsValidFolder(assetDir))
+                AssetDatabase.CreateFolder("Assets", "LCC_GeneratedColliders");
+            var assetPath = $"{assetDir}/{parent.name}_collider.asset";
+            // 기존 동명 에셋이 있으면 덮어씀
+            var existingAsset = AssetDatabase.LoadAssetAtPath<Mesh>(assetPath);
+            if (existingAsset != null) AssetDatabase.DeleteAsset(assetPath);
+            AssetDatabase.CreateAsset(mesh, assetPath);
+
+            // 기존 __LccCollider 자식 제거
+            if (_bulkColReplaceExisting)
+            {
+                var existing = parent.Find("__LccCollider");
+                if (existing != null) DestroyImmediate(existing.gameObject);
+            }
+            else if (parent.Find("__LccCollider") != null)
+            {
+                return;
+            }
+
+            var go = new GameObject("__LccCollider");
+            Undo.RegisterCreatedObjectUndo(go, "Regen LCC Collider");
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = Vector3.zero;
+            go.transform.localRotation = Quaternion.identity;
+            go.transform.localScale    = Vector3.one;
+
+            var mc = go.AddComponent<MeshCollider>();
+            mc.sharedMesh = mesh;
+
+            if (_bulkColShowMesh)
+            {
+                go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                var mr = go.AddComponent<MeshRenderer>();
+                const string matPath = "Assets/LCC_GeneratedColliders/__lcc_collider_mat.mat";
+                var mat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+                if (mat == null)
+                {
+                    var sh = Shader.Find("Standard") ?? Shader.Find("Universal Render Pipeline/Lit");
+                    mat = new Material(sh) { color = new Color(0.4f, 1.0f, 0.4f, 0.5f) };
+                    AssetDatabase.CreateAsset(mat, matPath);
+                }
+                mr.sharedMaterial = mat;
+            }
+
+            EditorUtility.SetDirty(parent.gameObject);
+            if (parent.gameObject.scene.IsValid())
+                UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(parent.gameObject.scene);
+        }
+
+        [Serializable]
+        class FlatColliderResponse
+        {
+            public string  mode;
+            public float[] verts_flat;
+            public int[]   tris_flat;
+            public int     verts_total;
+            public int     tris_total;
         }
 
         // ──────── 🔺 MESH (v1 page 3) ────────────────────────────────────
@@ -990,9 +1495,12 @@ namespace Virnect.Lcc.Editor
                         $"n_lcc = {r.n_lcc:N0}   n_ref = {r.n_ref:N0}\n" +
                         $"chamfer symmetric = {r.chamfer_symmetric:F4} m\n" +
                         $"Hausdorff         = {r.hausdorff:F4} m\n" +
-                        $"RMS               = {r.rms:F4} m\n" +
+                        $"mean / RMS        = {r.mean:F4} / {r.rms:F4} m\n" +
                         $"p50 / p90 / p99   = {r.p50:F3} / {r.p90:F3} / {r.p99:F3} m\n" +
                         $"elapsed           = {r.elapsed_sec:F2} s";
+                    _cmpHistBins   = r.hist_bins;
+                    _cmpHistCounts = r.hist_counts;
+                    _cmpP50 = r.p50; _cmpP90 = r.p90; _cmpP99 = r.p99;
                 }
                 catch (System.Exception e) { _cmpResult = "parse error: " + e.Message; }
                 finally { _cmpBusy = false; req.Dispose(); Repaint(); }
@@ -1004,6 +1512,9 @@ namespace Virnect.Lcc.Editor
         {
             public int n_lcc, n_ref;
             public float chamfer_symmetric, hausdorff, rms, p50, p90, p99, elapsed_sec;
+            public float mean;
+            public float[] hist_bins;
+            public int[]   hist_counts;
         }
     }
 }
