@@ -174,25 +174,25 @@ namespace LccDropForge
             splatGO.transform.rotation = Quaternion.Euler(-180f, 0f, 0f);
             Undo.RegisterCreatedObjectUndo(splatGO, "Auto-spawn LCC Splat root");
 
-            // 2) __LccCollider 자식 (proxy mesh PLY 사용)
-            try
+            // 2) __LccCollider — 백엔드 /api/mesh-collider 호출 (XGrids proxy mesh 사용 안 함)
+            //    GenerateAsync 비동기 — _ArasP child 셋업 후 mesh 도착 시점에 콜라이더 부착
+            string lccAssetPath = AssetDatabase.GetAssetPath(lccScene);
+            string spawnNameLocal = spawnName;
+            GameObject splatGORef = splatGO;
+            LccBackendColliderBuilder.GenerateAsync(lccAssetPath, (mesh, err) =>
             {
-                string plyPath = lccScene.ResolveProxyMeshPlyAssetPath();
-                if (!string.IsNullOrEmpty(plyPath) && File.Exists(Path.GetFullPath(plyPath)))
-                {
-                    var mesh = Virnect.Lcc.LccMeshPlyLoader.Load(Path.GetFullPath(plyPath));
-                    if (mesh != null)
-                    {
-                        var colGO = new GameObject("__LccCollider");
-                        colGO.transform.SetParent(splatGO.transform, false);
-                        var mc = colGO.AddComponent<MeshCollider>();
-                        mc.sharedMesh = mesh;
-                        mc.convex = false;
-                        Debug.Log($"[LccDropForge] {spawnName}: __LccCollider ({mesh.vertexCount:N0} verts)");
-                    }
-                }
-            }
-            catch (System.Exception e) { Debug.LogWarning($"[LccDropForge] {spawnName} collider 추가 실패: {e.Message}"); }
+                if (mesh == null) { Debug.LogWarning($"[LccDropForge] {spawnNameLocal} 백엔드 collider 실패: {err} · proxy fallback 가능 — Tools > Lcc Drop Forge > Scene · Ensure MeshColliders 메뉴 사용"); return; }
+                if (splatGORef == null) return;
+                var colGO = new GameObject("__LccCollider");
+                colGO.transform.SetParent(splatGORef.transform, false);
+                colGO.transform.localPosition = Vector3.zero;
+                colGO.transform.localRotation = Quaternion.Inverse(splatGORef.transform.rotation);
+                colGO.transform.localScale = Vector3.one;
+                var mc = colGO.AddComponent<MeshCollider>();
+                mc.sharedMesh = mesh;
+                mc.convex = false;
+                Debug.Log($"[LccDropForge] {spawnNameLocal}: __LccCollider 백엔드 생성 ({mesh.vertexCount:N0} verts)");
+            });
 
             // 3) _ArasP 자식 (world transform identity → splat 정상 정렬) + GaussianSplatRenderer
             var arasGO = new GameObject("_ArasP");
