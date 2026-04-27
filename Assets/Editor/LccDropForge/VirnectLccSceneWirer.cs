@@ -1428,18 +1428,13 @@ namespace LccDropForge
             var sm = UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene();
             var roots = sm.GetRootGameObjects();
 
-            // 1) 모든 Splat 수집 + position 0,0,0 + rotation 유지 (사용자 수동 정합 결과 보존)
+            // 1) 모든 Splat 수집 — position/rotation 모두 보존 (사용자 수동 정합 절대 안 건드림)
             var splats = new System.Collections.Generic.List<GameObject>();
             foreach (var go in roots)
                 if (go != null && go.name.StartsWith("Splat_") && !go.name.StartsWith("Splat_ArasP_"))
                     splats.Add(go);
             if (splats.Count == 0) { Debug.LogError("[Walkable] Splat_ 객체 없음"); return; }
-            foreach (var s in splats)
-            {
-                Undo.RecordObject(s.transform, "Reset Splat position");
-                s.transform.position = Vector3.zero;
-            }
-            Debug.Log($"[Walkable] {splats.Count}개 Splat position → (0,0,0) 초기화 (rotation 유지)");
+            Debug.Log($"[Walkable] {splats.Count}개 Splat 발견 — 위치/회전 보존 (사용자 정합 그대로)");
 
             // 1.5) LccGroup 부모 GameObject 만들기 (없으면) + Splat 들 reparent (worldPositionStays=true)
             var existingGroup = System.Array.Find(roots, r => r != null && r.name == "LccGroup");
@@ -1591,6 +1586,27 @@ namespace LccDropForge
             Debug.Log("[Walkable] ✓ Setup 완료");
             Debug.Log($"  · Player_LccWalker @ {spawnPos} (combined bounds top + 5m)");
             Debug.Log("  · ▶ Play 모드 → WASD 이동 · Shift 달리기 · Space 점프 · 마우스 카메라 회전 · ESC 마우스 lock 해제");
+        }
+
+        [MenuItem("Tools/Lcc Drop Forge/Scene · ⚠ Reset ALL Splat positions to (0,0,0) — destructive (정합 깨짐 주의)")]
+        static void DevResetSplatPositionsExplicit()
+        {
+            if (!EditorUtility.DisplayDialog(
+                "Reset Splat positions",
+                "모든 Splat_ GameObject 의 position 을 (0,0,0) 으로 초기화합니다. 사용자 수동 정합 결과가 깨집니다.\n\n계속할까요?",
+                "위치 초기화", "취소")) return;
+            var sm = UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene();
+            int n = 0;
+            foreach (var go in sm.GetRootGameObjects())
+            {
+                if (go == null || !go.name.StartsWith("Splat_") || go.name.StartsWith("Splat_ArasP_")) continue;
+                Undo.RecordObject(go.transform, "Reset Splat position (explicit)");
+                go.transform.position = Vector3.zero;
+                EditorUtility.SetDirty(go);
+                n++;
+            }
+            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(sm);
+            Debug.Log($"[Reset] {n}개 Splat position → (0,0,0)");
         }
 
         [MenuItem("Tools/Lcc Drop Forge/Scene · Set ALL Splat rotation to (-180, 0, 0)")]
