@@ -1,0 +1,85 @@
+# Unity 표준 .gitignore + 본 프로젝트 특화 정리
+
+# ─────────── Unity 자동 생성 폴더 (clone 후 Unity가 재생성) ───────────
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Mm]emoryCaptures/
+[Uu]ser[Ss]ettings/
+*.tmp
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+sysinfo.txt
+*.apk
+*.aab
+*.unitypackage
+*.app
+crashlytics-build.properties
+
+# ─────────── Asset Store 패키지 / Library 임시 ───────────
+[Aa]ssets/AssetStoreTools*
+[Aa]ssets/Plugins/Editor/JetBrains*
+
+# ─────────── 본 프로젝트 임시 산출물 ───────────
+# splat-transform PLY 임시 (lcc → ply 변환 산출물 — Aras-P asset 빌드 후 불필요)
+[Ll]ibrary/lcc_to_ply/
+
+# 캡처 임시 PNG
+[Ll]ibrary/tmp_*.png
+
+# Visual Studio
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Rider
+.idea/
+
+# Built-in Unity test results
+*.Test.csproj
+TestResults/
+
+# ─────────── GitHub 100MB 한도 회피: 큰 binary 제외 ───────────
+# LCC 원본 데이터 (G:\에서 별도 다운 또는 사용자 LCC 사용)
+[Aa]ssets/LCC_Drops/*/data.bin
+[Aa]ssets/LCC_Drops/*/index.bin
+[Aa]ssets/LCC_Drops/*/collision.lci
+[Aa]ssets/LCC_Drops/*/environment.bin
+[Aa]ssets/LCC_Drops/*/assets/
+
+# Aras-P GaussianSplatAsset 산출물 (메뉴로 재생성 가능, splat-transform 거쳐 빌드)
+[Aa]ssets/GaussianAssets/*_pos.bytes
+[Aa]ssets/GaussianAssets/*_col.bytes
+[Aa]ssets/GaussianAssets/*_oth.bytes
+[Aa]ssets/GaussianAssets/*_shs.bytes
+[Aa]ssets/GaussianAssets/*_chk.bytes
+
+# Scene2 (Splat 5개 직접 직렬화 — 무거움). 받는 쪽은 Scene5_LccRotate 만 필요
+[Aa]ssets/Scenes/Scene2_MeshVsSplat.unity
+
+# 큰 atlas/texture
+[Aa]ssets/Sci-Fi UI/_SciFi_GUISkin_/atlas.png
+
+# ─────────── 본 프로젝트는 push 대상 ───────────
+# 다음은 commit 됨:
+#   Assets/                         (LCC_Drops/, GaussianAssets/, Editor/LccDropForge/, Scenes/, LccCharacterSwitcher.cs, LccPlayerController.cs, LccCameraFollow.cs, LccSelectionBase.cs, LccInteractiveRotator.cs)
+#   Packages/                       (manifest.json, packages-lock.json — clone 시 자동 패키지 다운)
+#   ProjectSettings/                (URP, color space, input system, layers, tags 등 모든 프로젝트 설정)
+#   README.md
+#   .gitignore

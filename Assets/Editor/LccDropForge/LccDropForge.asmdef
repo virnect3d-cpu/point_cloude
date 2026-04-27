@@ -1,0 +1,17 @@
+{
+    "name": "LccDropForge.Editor",
+    "rootNamespace": "LccDropForge",
+    "references": [
+        "GUID:4b653174f8fcdcd49b4c9a6f1ca8c7c3",
+        "GUID:14414175af4b366469db63f2efee475f",
+        "GUID:ecba0e46804f21f9b8bcc64f6acadc69",
+        "GUID:509159a8b9510e3268e09d842601b076"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

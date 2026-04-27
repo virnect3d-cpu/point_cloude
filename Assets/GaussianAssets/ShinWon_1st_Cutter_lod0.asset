@@ -1,0 +1,31 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 33b71fae31e6c7d438e8566dc713e666, type: 3}
+  m_Name: ShinWon_1st_Cutter
+  m_EditorClassIdentifier: GaussianSplatting::GaussianSplatting.Runtime.GaussianSplatAsset
+  m_FormatVersion: 20231020
+  m_SplatCount: 5149480
+  m_BoundsMin: {x: -30.932032, y: -37.685825, z: -7.112035}
+  m_BoundsMax: {x: 40.391926, y: 71.5244, z: 16.554733}
+  m_DataHash:
+    serializedVersion: 2
+    Hash: 4aefb016e92985c1bfd903b80fdc6bf2
+  m_PosFormat: 2
+  m_ScaleFormat: 2
+  m_SHFormat: 3
+  m_ColorFormat: 2
+  m_PosData: {fileID: 4900000, guid: 61a450dee16b9bf43b6d432d79649252, type: 3}
+  m_ColorData: {fileID: 4900000, guid: f73e3c98432ae584e8ee858c1d36e361, type: 3}
+  m_OtherData: {fileID: 4900000, guid: da18ee2e6fb74b24399f0a63f61dd012, type: 3}
+  m_SHData: {fileID: 4900000, guid: b68f22fe0d07b6b43b4bb9f0de4789bf, type: 3}
+  m_ChunkData: {fileID: 4900000, guid: d655b1bf350324649a0ef920d7322d7e, type: 3}
+  m_Cameras: []
